@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getArticle } from '../api/news.js';
 import ArticleMeta, { formatDate } from '../components/ArticleMeta.jsx';
+import ArticleContent from '../components/ArticleContent.jsx';
 import StoryImage from '../components/StoryImage.jsx';
 import { ErrorState, LoadingArticle } from '../components/NewsStates.jsx';
 
@@ -46,31 +47,37 @@ export default function ArticlePage() {
 
   return (
     <article className="article-page">
-      <div className="article-heading site-shell">
-        <Link className="back-link" to="/news/">← All stories</Link>
-        <ArticleMeta article={article} />
-        <h1>{article.title}</h1>
-        {article.summary && <p className="article-dek">{article.summary}</p>}
-        <div className="article-byline">
-          <span>By <strong>{article.author_name}</strong></span>
-          <span aria-hidden="true" className="byline-dot" />
-          <span>{formatDate(article.published_at || article.created_at)}</span>
-        </div>
-      </div>
-
-      <figure className="article-hero site-shell">
+      <header className="article-cover">
         <StoryImage
           className="article-hero-image"
           src={article.cover_image_url}
-          alt={article.title}
+          alt=""
           priority
         />
-        {article.cover_image_url && <figcaption>{article.title}</figcaption>}
-      </figure>
+        <div className="article-cover-shade" />
+        <div className="article-heading site-shell">
+          <Link className="back-link" to="/news/">← All stories</Link>
+          <ArticleMeta article={article} />
+          <h1>{article.title}</h1>
+          {article.summary && <p className="article-dek">{article.summary}</p>}
+          <div className="article-byline">
+            <span>By <strong>{article.author_name}</strong></span>
+            <span aria-hidden="true" className="byline-dot" />
+            <time dateTime={article.published_at || article.created_at}>
+              {formatDate(article.published_at || article.created_at)}
+            </time>
+          </div>
+        </div>
+        <span className="article-cover-mark" aria-hidden="true">STARTUPTN / NEWS</span>
+      </header>
 
       <div className="article-body-wrap">
         <div className="article-body">
-          <div className="article-content">{article.content}</div>
+          <div className="article-body-heading">
+            <span className="eyebrow">The story</span>
+            <span className="article-body-rule" aria-hidden="true" />
+          </div>
+          <ArticleContent content={article.content} />
           {article.source_url && (
             <p className="source-attribution">
               Source: <a href={article.source_url} target="_blank" rel="noopener noreferrer">{article.source_url}</a>

@@ -5,7 +5,11 @@ import StoryImage from './StoryImage.jsx';
 export default function StoryCard({ article, featured = false }) {
   return (
     <article className={`story-card${featured ? ' story-card--featured' : ''}`}>
-      <Link className="story-card-image-link" to={`/news/${encodeURIComponent(article.slug)}`} tabIndex={-1} aria-hidden="true">
+      <Link
+        className="story-card-image-link"
+        to={`/news/${encodeURIComponent(article.slug)}`}
+        aria-label={`Read story: ${article.title}`}
+      >
         <StoryImage
           className="story-card-image"
           src={article.cover_image_url}

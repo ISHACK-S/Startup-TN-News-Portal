@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createAdminArticle, getAdminArticle, updateAdminArticle } from '../../api/admin.js';
 import { uploadImage } from '../../api/client.js';
 import ArticleMeta from '../../components/ArticleMeta.jsx';
+import ArticleContent from '../../components/ArticleContent.jsx';
 import StoryImage from '../../components/StoryImage.jsx';
 import { AdminError, AdminLoading } from '../components/AdminStates.jsx';
 import { getCategories } from '../../api/news.js';
@@ -421,7 +422,10 @@ function ArticlePreview({ article, onClose }) {
           <h1 id="preview-title">{article.title || 'Your headline will appear here'}</h1>
           <p className="admin-preview-summary">{article.summary || 'Your summary will appear here.'}</p>
           <p className="admin-preview-byline">By {article.author_name || 'Author name'}</p>
-          <div className="admin-preview-content">{article.content || 'Your article content will appear here.'}</div>
+          <ArticleContent
+            className="admin-preview-content"
+            content={article.content || 'Your article content will appear here.'}
+          />
           {article.source_url && <p className="admin-preview-source">Source: {article.source_url}</p>}
         </article>
       </section>

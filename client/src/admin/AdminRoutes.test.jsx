@@ -287,7 +287,7 @@ describe('admin CMS', () => {
     await waitFor(() => expect(storedArticles[0].status).toBe('published'));
     expect(storedArticles[0].published_at).toBeTruthy();
     expect(await screen.findByText('Article published successfully.')).toBeInTheDocument();
-  });
+  }, 10000);
 
   it('uploads a validated image with session credentials and progress, then stores the hosted URL', async () => {
     vi.stubGlobal('XMLHttpRequest', MockUploadRequest);

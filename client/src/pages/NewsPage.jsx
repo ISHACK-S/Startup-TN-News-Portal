@@ -99,7 +99,7 @@ export default function NewsPage() {
       )}
       {!loading && !error && articles.length > 0 && (
         <>
-          <div className="story-grid news-grid">
+          <div className="story-grid news-grid" key={`${category}-${query}-${page}`}>
             {articles.map((article) => <StoryCard article={article} key={article.id} />)}
           </div>
           {pagination?.totalPages > 1 && (

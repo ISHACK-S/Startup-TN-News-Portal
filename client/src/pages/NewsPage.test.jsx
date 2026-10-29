@@ -15,7 +15,7 @@ const articles = [
     title: 'Tamil Nadu founders build what comes next',
     slug: 'tn-founders-next',
     summary: 'A new generation of founders is creating technology for local needs.',
-    content: 'Full story about founders.',
+    content: 'Full story about founders.\n\nSecond paragraph with a deliberate line break:\ncontinued text.\n\n\nThird paragraph after extra blank lines.',
     category_id: 1,
     category_name: 'Startups',
     category_slug: 'startups',
@@ -93,6 +93,20 @@ afterEach(() => {
 });
 
 describe('public news experience', () => {
+  it('builds the homepage lead, recent-headline strip, and category sections from API stories', async () => {
+    installApiMock();
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+
+    expect((await screen.findAllByRole('heading', { name: articles[0].title })).length).toBeGreaterThan(0);
+    expect(screen.getByRole('navigation', { name: 'Recent headlines' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: articles[1].title }).some((link) =>
+      link.getAttribute('href') === `/news/${articles[1].slug}`
+    )).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Latest news' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Startups' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Funding' })).toBeInTheDocument();
+  });
+
   it('shows loading skeletons while news are pending', async () => {
     let resolveRequest;
     vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveRequest = resolve; })));
@@ -117,6 +131,10 @@ describe('public news experience', () => {
     expect(await screen.findByText(articles[0].title)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Funding' }));
     expect(await screen.findByText(articles[1].title)).toBeInTheDocument();
+    const navigation = screen.getByRole('navigation', { name: 'Main navigation' });
+    expect(within(navigation).getByRole('link', { name: 'Funding' })).toHaveClass('active');
+    expect(within(navigation).getByRole('link', { name: 'Funding' })).toHaveAttribute('aria-current', 'page');
+    expect(within(navigation).getByRole('link', { name: 'Latest news' })).not.toHaveClass('active');
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining('category=funding'),
@@ -139,7 +157,12 @@ describe('public news experience', () => {
     await user.click(await screen.findByRole('link', { name: articles[0].title }));
 
     expect(await screen.findByRole('heading', { name: articles[0].title })).toBeInTheDocument();
+    expect(document.querySelector('.article-cover')).toBeInTheDocument();
+    expect(document.querySelector('.article-body')).toBeInTheDocument();
     expect(screen.getByText('Full story about founders.')).toBeInTheDocument();
+    const articleContent = document.querySelector('.article-content');
+    expect(articleContent.querySelectorAll(':scope > p')).toHaveLength(3);
+    expect(articleContent.querySelectorAll('p')[1].querySelector('br')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: articles[0].source_url })).toHaveAttribute('href', articles[0].source_url);
     expect(screen.getByRole('link', { name: 'Share on LinkedIn' })).toHaveAttribute(
       'href',
