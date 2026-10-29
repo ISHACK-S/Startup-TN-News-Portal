@@ -1,0 +1,20 @@
+{
+  "name": "startuptn-news",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=@startuptn-news/server\" \"npm run dev --workspace=@startuptn-news/client\"",
+    "start": "npm run start --workspace=@startuptn-news/server",
+    "build": "npm run build --workspace=@startuptn-news/client",
+    "check": "npm run check --workspace=@startuptn-news/server && npm run build --workspace=@startuptn-news/client",
+    "test": "npm run test --workspace=@startuptn-news/server && npm run test --workspace=@startuptn-news/client",
+    "provision-admin": "npm run provision-admin --workspace=@startuptn-news/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}
