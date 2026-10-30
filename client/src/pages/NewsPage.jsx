@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { getCategories, getNews } from '../api/news.js';
 import CategoryFilter from '../components/CategoryFilter.jsx';
 import NewsSearch from '../components/NewsSearch.jsx';
+import RevealSection from '../components/RevealSection.jsx';
 import StoryCard from '../components/StoryCard.jsx';
 import { EmptyState, ErrorState, StoryGridSkeleton } from '../components/NewsStates.jsx';
 
@@ -99,9 +100,9 @@ export default function NewsPage() {
       )}
       {!loading && !error && articles.length > 0 && (
         <>
-          <div className="story-grid news-grid" key={`${category}-${query}-${page}`}>
+          <RevealSection as="div" className="story-grid news-grid" key={`${category}-${query}-${page}`}>
             {articles.map((article) => <StoryCard article={article} key={article.id} />)}
-          </div>
+          </RevealSection>
           {pagination?.totalPages > 1 && (
             <nav className="pagination" aria-label="News pages">
               <button

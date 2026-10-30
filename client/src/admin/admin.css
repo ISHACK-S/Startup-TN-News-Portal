@@ -1625,7 +1625,44 @@
   min-height: 340px;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 13px;
-  line-height: 1.7;
+}
+
+.admin-field > label {
+  color: #354454;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.admin-inline-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-inline-image-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.admin-inline-image-input:focus-visible + .admin-field .admin-button {
+  outline: 3px solid var(--admin-gold);
+  outline-offset: 3px;
+}
+
+.admin-inline-image-progress {
+  display: grid;
+  flex-basis: 100%;
+  gap: 5px;
+  color: #66717c;
+  font-size: 11px;
+}
+
+.admin-inline-image-progress progress {
+  width: min(100%, 320px);
 }
 
 .admin-featured-toggle input,

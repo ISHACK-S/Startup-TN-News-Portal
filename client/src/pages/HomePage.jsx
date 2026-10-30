@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getNews } from '../api/news.js';
 import ArticleMeta from '../components/ArticleMeta.jsx';
+import NewsTicker from '../components/NewsTicker.jsx';
 import RevealSection from '../components/RevealSection.jsx';
 import StoryCard from '../components/StoryCard.jsx';
 import StoryImage from '../components/StoryImage.jsx';
@@ -37,11 +38,8 @@ export default function HomePage() {
     () => articles.filter((article) => article.id !== featured?.id).slice(0, 3),
     [articles, featured]
   );
-  const supportingIds = new Set(supporting.map((article) => article.id));
-  const latest = articles.filter(
-    (article) => article.id !== featured?.id && !supportingIds.has(article.id)
-  );
-  const tickerArticles = articles.filter((article) => article.id !== featured?.id).slice(0, 5);
+  const latest = articles.filter((article) => article.id !== featured?.id);
+  const tickerArticles = articles.slice(0, 5);
   const trending = articles.filter((article) => article.is_featured && article.id !== featured?.id);
   const categorySections = ['Startups', 'Funding', 'Events', 'Policy', 'Innovation', 'Ecosystem']
     .map((name) => ({
@@ -75,8 +73,10 @@ export default function HomePage() {
 
         {!loading && !error && featured && (
           <>
+            <NewsTicker articles={tickerArticles} />
+
             <RevealSection
-              className={`front-page-lead${supporting.length < 2 ? ' front-page-lead--solo' : ''}`}
+              className={`front-page-lead${supporting.length === 0 ? ' front-page-lead--solo' : ''}`}
               aria-labelledby="featured-heading"
             >
               <div className="front-page-lead-main">
@@ -120,40 +120,10 @@ export default function HomePage() {
               </aside>
             </RevealSection>
 
-            <nav className="news-ticker" aria-label="Recent headlines">
-              <span className="news-ticker-label">
-                <i aria-hidden="true" />
-                <span>Latest</span>
-              </span>
-              {tickerArticles.length > 0 ? (
-                <div className="news-ticker-items">
-                  <div className="news-ticker-track">
-                    {[false, true].map((duplicate) => (
-                      <div
-                        className="news-ticker-group"
-                        aria-hidden={duplicate ? 'true' : undefined}
-                        inert={duplicate || undefined}
-                        key={duplicate ? 'duplicate' : 'stories'}
-                      >
-                        {tickerArticles.map((article) => (
-                          <Link key={article.id} to={`/news/${encodeURIComponent(article.slug)}`}>
-                            {article.title}
-                            <span className="news-ticker-meta">{article.category_name}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="news-ticker-empty">Published stories from the Tamil Nadu startup ecosystem.</p>
-              )}
-              <Link className="news-ticker-more" to="/news/" aria-label="Browse all latest headlines">
-                All news <span aria-hidden="true">↗</span>
-              </Link>
-            </nav>
-
-            <RevealSection className="latest-section" aria-labelledby="latest-heading">
+            <RevealSection
+              className={`latest-section${latest.length === 0 ? ' latest-section--empty' : ''}`}
+              aria-labelledby="latest-heading"
+            >
               <div className="section-heading section-heading--row">
                 <div>
                   <span className="eyebrow">New reporting and updates</span>
@@ -164,9 +134,14 @@ export default function HomePage() {
                 </Link>
               </div>
               {latest.length > 0 ? (
-                <div className="story-grid">
+                <div className={`story-grid${latest.length === 1 ? ' story-grid--single' : latest.length === 2 ? ' story-grid--double' : ''}`}>
                   {latest.map((article, index) => (
-                    <StoryCard article={article} featured={index === 0} key={article.id} />
+                    <StoryCard
+                      article={article}
+                      featured={latest.length === 1 || (latest.length >= 3 && index === 0)}
+                      index={index}
+                      key={article.id}
+                    />
                   ))}
                 </div>
               ) : (
@@ -184,7 +159,7 @@ export default function HomePage() {
                 <div className="section-heading section-heading--row">
                   <div>
                     <span className="eyebrow">Featured picks from the newsroom</span>
-                    <h2 id="trending-heading">Trending</h2>
+                    <h2 id="trending-heading">Featured stories</h2>
                   </div>
                 </div>
                 <div className="trending-list">
@@ -196,9 +171,16 @@ export default function HomePage() {
             )}
 
             {categorySections.length > 0 && (
-              <RevealSection className="category-sections" aria-label="Latest by category">
-                {categorySections.map((category) => (
-                  <section className="category-section" key={category.slug} aria-labelledby={`category-${category.slug}`}>
+              <RevealSection
+                className={`category-sections${categorySections.length === 1 ? ' category-sections--single' : ''}`}
+                aria-label="Latest by category"
+              >
+                {categorySections.map((category, index) => (
+                  <section
+                    className={`category-section${index % 2 ? ' category-section--alternate' : ''}${index === 0 && category.articles.length >= 3 ? ' category-section--lead' : ''}${index > 0 && category.articles.length >= 3 ? ' category-section--wide' : ''}`}
+                    key={category.slug}
+                    aria-labelledby={`category-${category.slug}`}
+                  >
                     <div className="section-heading section-heading--row">
                       <div>
                         <span className="eyebrow">From the ecosystem</span>
@@ -208,9 +190,14 @@ export default function HomePage() {
                         More {category.name} <span aria-hidden="true">→</span>
                       </Link>
                     </div>
-                    <div className="story-grid category-story-grid">
-                      {category.articles.map((article) => (
-                        <StoryCard article={article} key={article.id} />
+                    <div className={`story-grid category-story-grid${category.articles.length === 1 ? ' category-story-grid--single' : category.articles.length === 2 ? ' category-story-grid--double' : ''}`}>
+                      {category.articles.map((article, storyIndex) => (
+                        <StoryCard
+                          article={article}
+                          featured={index === 0 && category.articles.length >= 3 && storyIndex === 0}
+                          index={storyIndex}
+                          key={article.id}
+                        />
                       ))}
                     </div>
                   </section>

@@ -44,7 +44,7 @@ const articles = [
   }
 ];
 
-function installApiMock() {
+function installApiMock(newsArticles = articles) {
   const jsonResponse = (payload, status = 200) => ({
     ok: status >= 200 && status < 300,
     status,
@@ -62,7 +62,7 @@ function installApiMock() {
       return jsonResponse({ error: { message: 'Article not found.' } }, 404);
     }
     if (url.pathname === '/api/news') {
-      let filtered = [...articles];
+      let filtered = [...newsArticles];
       const q = url.searchParams.get('q')?.toLowerCase();
       const category = url.searchParams.get('category');
       if (q) {
@@ -103,8 +103,59 @@ describe('public news experience', () => {
       link.getAttribute('href') === `/news/${articles[1].slug}`
     )).toBe(true);
     expect(screen.getByRole('heading', { name: 'Latest news' })).toBeInTheDocument();
+    const latestSection = document.querySelector('.latest-section');
+    expect(latestSection).not.toHaveClass('latest-section--empty');
+    expect(within(latestSection).getByRole('link', { name: articles[1].title })).toHaveAttribute(
+      'href',
+      `/news/${articles[1].slug}`
+    );
+    expect(within(latestSection).getByText(articles[1].summary)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Startups' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Funding' })).toBeInTheDocument();
+    expect(document.querySelectorAll('.category-story-grid--single')).toHaveLength(2);
+  });
+
+  it('balances primary and secondary three-story category sections', async () => {
+    const startupStories = [
+      ...articles.filter((article) => article.category_slug === 'startups'),
+      {
+        ...articles[0],
+        id: 13,
+        title: 'A third StartupTN story',
+        slug: 'third-startup-story'
+      },
+      {
+        ...articles[0],
+        id: 14,
+        title: 'A fourth StartupTN story',
+        slug: 'fourth-startup-story'
+      },
+      ...articles.filter((article) => article.category_slug === 'funding'),
+      {
+        ...articles[1],
+        id: 15,
+        title: 'A second Funding story',
+        slug: 'second-funding-story'
+      },
+      {
+        ...articles[1],
+        id: 16,
+        title: 'A third Funding story',
+        slug: 'third-funding-story'
+      }
+    ];
+    installApiMock(startupStories);
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+
+    await screen.findAllByRole('heading', { name: 'A fourth StartupTN story' });
+    const leadGrid = document.querySelector('.category-section--lead .category-story-grid');
+    expect(leadGrid).not.toHaveClass('category-story-grid--double');
+    expect(leadGrid.querySelectorAll('.story-card--featured')).toHaveLength(1);
+    expect(leadGrid.querySelectorAll('.story-card')).toHaveLength(3);
+
+    const secondarySection = document.querySelectorAll('.category-section')[1];
+    expect(secondarySection).toHaveClass('category-section--wide');
+    expect(secondarySection.querySelectorAll('.story-card')).toHaveLength(3);
   });
 
   it('shows loading skeletons while news are pending', async () => {

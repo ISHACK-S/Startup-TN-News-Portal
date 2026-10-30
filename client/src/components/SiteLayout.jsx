@@ -1,6 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Brand from './Brand.jsx';
+import RevealSection from './RevealSection.jsx';
+
+const HEADER_COMPACT_AFTER = 104;
+const HEADER_EXPAND_BEFORE = 12;
 
 const categories = [
   ['Startups', 'startups'],
@@ -14,8 +18,48 @@ const categories = [
 export default function SiteLayout() {
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const compactRef = useRef(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    let frame = 0;
+    const updateHeader = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const scrollY = window.scrollY;
+        // Keep enough hysteresis for scroll anchoring while the header resizes.
+        if (scrollY > HEADER_COMPACT_AFTER && !compactRef.current) {
+          compactRef.current = true;
+          setCompact(true);
+        } else if (scrollY < HEADER_EXPAND_BEFORE && compactRef.current) {
+          compactRef.current = false;
+          setCompact(false);
+        }
+      });
+    };
+    if (window.scrollY > HEADER_COMPACT_AFTER) {
+      compactRef.current = true;
+      setCompact(true);
+    }
+    window.addEventListener('scroll', updateHeader, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', updateHeader);
+    };
+  }, []);
+
+  useEffect(() => setMenuOpen(false), [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [menuOpen]);
   const activeCategory = location.pathname.replace(/\/+$/, '') === '/news'
     ? new URLSearchParams(location.search).get('category')
     : null;
@@ -31,7 +75,7 @@ export default function SiteLayout() {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to content</a>
-      <header className="site-header">
+      <header className={`site-header${compact ? ' site-header--compact' : ''}`}>
         <div className="utility-bar">
           <div className="site-shell mx-auto utility-inner">
             <span>Stories from the Tamil Nadu startup ecosystem</span>
@@ -61,10 +105,10 @@ export default function SiteLayout() {
               className="menu-toggle"
               aria-expanded={menuOpen}
               aria-controls="primary-navigation"
+              aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
               onClick={() => setMenuOpen((open) => !open)}
             >
-              <span className="sr-only">{menuOpen ? 'Close menu' : 'Open menu'}</span>
-              <span aria-hidden="true">{menuOpen ? '×' : '☰'}</span>
+              <MenuIcon open={menuOpen} />
             </button>
           </div>
         </div>
@@ -97,7 +141,7 @@ export default function SiteLayout() {
         <Outlet />
       </main>
       <footer className="site-footer">
-        <div className="site-shell mx-auto footer-main">
+        <RevealSection as="div" className="site-shell mx-auto footer-main">
           <div className="footer-publication">
             <Brand compact />
             <p>Independent stories and perspectives from across Tamil Nadu’s startup ecosystem.</p>
@@ -110,7 +154,7 @@ export default function SiteLayout() {
               <Link key={slug} to={`/news/?category=${slug}`}>{name}</Link>
             ))}
           </div>
-        </div>
+        </RevealSection>
         <div className="footer-bottom">
           <div className="site-shell mx-auto">
             <span>© {new Date().getFullYear()} StartupTN News</span>
@@ -127,6 +171,16 @@ function SearchIcon() {
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
       <circle cx="10.8" cy="10.8" r="6.8" stroke="currentColor" strokeWidth="1.8" />
       <path d="m16 16 4.2 4.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MenuIcon({ open }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+      {open
+        ? <path d="m6 6 12 12M18 6 6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        : <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}
     </svg>
   );
 }

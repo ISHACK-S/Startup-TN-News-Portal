@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App.jsx';
@@ -264,10 +264,12 @@ describe('admin CMS', () => {
     expect(
       within(screen.getByRole('dialog')).getByText('The full story, including verified details.')
     ).toBeInTheDocument();
+
     await user.click(screen.getByRole('button', { name: 'Close preview' }));
 
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('Draft saved successfully.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Publish article' })).toBeEnabled());
     expect(storedArticles[0]).toMatchObject({
       title: 'A founder builds for Tamil Nadu',
       status: 'draft',
@@ -324,8 +326,65 @@ describe('admin CMS', () => {
     });
   });
 
+  it('inserts uploaded images at the selected position and saves the existing story text', async () => {
+    vi.stubGlobal('XMLHttpRequest', MockUploadRequest);
+    const user = userEvent.setup();
+    renderApp('/admin/news/2/edit');
+    await signIn(user);
+
+    const editor = await screen.findByLabelText(/^Full article/);
+    const originalContent = 'Existing first paragraph.\n\nExisting second paragraph.';
+    expect(editor).toHaveValue('Draft details.');
+    fireEvent.change(editor, { target: { value: originalContent } });
+    const insertionIndex = originalContent.indexOf('Existing second');
+    editor.setSelectionRange(insertionIndex, insertionIndex);
+    fireEvent.select(editor);
+
+    const image = new File([new Uint8Array([1, 2, 3])], 'inline.png', { type: 'image/png' });
+    await user.click(screen.getByRole('button', { name: 'Insert image into story' }));
+    await user.upload(screen.getByLabelText('Choose image to insert into story'), image);
+    expect(await screen.findByText('Image inserted into the story.')).toBeInTheDocument();
+
+    const insertedContent = editor.value;
+    expect(insertedContent).toContain('Existing first paragraph.');
+    expect(insertedContent).toContain('Existing second paragraph.');
+    expect(insertedContent.indexOf('Existing first paragraph.'))
+      .toBeLessThan(insertedContent.indexOf('![Article image]'));
+    expect(insertedContent.indexOf('![Article image]'))
+      .toBeLessThan(insertedContent.indexOf('Existing second paragraph.'));
+
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => {
+      expect(storedArticles.find((article) => article.id === 2).content).toBe(insertedContent);
+    });
+  });
+
+  it('appends an inline image when no editor cursor position was retained', async () => {
+    vi.stubGlobal('XMLHttpRequest', MockUploadRequest);
+    const user = userEvent.setup();
+    const originalContent = 'Existing article text.';
+    storedArticles.find((article) => article.id === 2).content = originalContent;
+    renderApp('/admin/news/2/edit');
+    await signIn(user);
+
+    const editor = await screen.findByLabelText(/^Full article/);
+    expect(editor).toHaveValue(originalContent);
+    await user.click(screen.getByRole('button', { name: 'Insert image into story' }));
+    await user.upload(
+      screen.getByLabelText('Choose image to insert into story'),
+      new File([new Uint8Array([1, 2, 3])], 'inline.png', { type: 'image/png' })
+    );
+
+    expect(await screen.findByText('Image inserted into the story.')).toBeInTheDocument();
+    expect(editor.value).toBe(
+      `${originalContent}\n\n![Article image](https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/new.png)`
+    );
+  });
+
   it('searches, edits, unpublishes, confirms deletion, and deletes articles through the API', async () => {
     const user = userEvent.setup();
+    const originalContent = 'Original paragraph one.\n\nOriginal paragraph two.';
+    storedArticles.find((article) => article.id === 2).content = originalContent;
     renderApp('/admin/news');
     await signIn(user);
     expect(await screen.findByText('Published ecosystem update')).toBeInTheDocument();
@@ -337,12 +396,14 @@ describe('admin CMS', () => {
 
     await user.click(screen.getByRole('link', { name: 'Unfinished programme announcement' }));
     expect(await screen.findByLabelText(/^Headline/)).toHaveValue('Unfinished programme announcement');
+    expect(screen.getByLabelText(/^Full article/)).toHaveValue(originalContent);
     await user.clear(screen.getByLabelText(/^Headline/));
     await user.type(screen.getByLabelText(/^Headline/), 'Programme update revised');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     await waitFor(() => {
       expect(storedArticles.find((article) => article.id === 2).title).toBe('Programme update revised');
     });
+    expect(storedArticles.find((article) => article.id === 2).content).toBe(originalContent);
 
     await user.click(screen.getByRole('link', { name: 'Articles' }));
     await screen.findByText('Programme update revised');

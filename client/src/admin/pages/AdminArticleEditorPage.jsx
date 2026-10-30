@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createAdminArticle, getAdminArticle, updateAdminArticle } from '../../api/admin.js';
 import { uploadImage } from '../../api/client.js';
 import ArticleMeta from '../../components/ArticleMeta.jsx';
 import ArticleContent from '../../components/ArticleContent.jsx';
 import StoryImage from '../../components/StoryImage.jsx';
+import { createInlineImageMarkup, isAllowedInlineImageUrl } from '../../utils/article-content.js';
 import { AdminError, AdminLoading } from '../components/AdminStates.jsx';
 import { getCategories } from '../../api/news.js';
 
@@ -53,8 +54,16 @@ export default function AdminArticleEditorPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadMessage, setUploadMessage] = useState('');
   const [uploadError, setUploadError] = useState('');
+  const [inlineImageUploading, setInlineImageUploading] = useState(false);
+  const [inlineImageProgress, setInlineImageProgress] = useState(0);
+  const [inlineImageError, setInlineImageError] = useState('');
+  const [inlineImageMessage, setInlineImageMessage] = useState('');
   const [attempt, setAttempt] = useState(0);
   const formRef = useRef(null);
+  const contentEditorRef = useRef(null);
+  const inlineImageInputRef = useRef(null);
+  const contentSelectionRef = useRef(null);
+  const pendingContentCursorRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -62,6 +71,20 @@ export default function AdminArticleEditorPage() {
     if (!localPreview) return undefined;
     return () => URL.revokeObjectURL(localPreview);
   }, [localPreview]);
+
+  useLayoutEffect(() => {
+    const cursor = pendingContentCursorRef.current;
+    const editor = contentEditorRef.current;
+    if (cursor === null || !editor) return;
+    editor.focus();
+    editor.setSelectionRange(cursor, cursor);
+    contentSelectionRef.current = {
+      start: cursor,
+      end: cursor,
+      content: editor.value
+    };
+    pendingContentCursorRef.current = null;
+  }, [article.content]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -148,6 +171,71 @@ export default function AdminArticleEditorPage() {
       setUploadError(uploadFailure.message);
     } finally {
       setUploading(false);
+    }
+  }
+
+  function rememberContentSelection(requireFocus = false) {
+    const editor = contentEditorRef.current;
+    if (!editor || (requireFocus && document.activeElement !== editor)) return;
+    contentSelectionRef.current = {
+      start: editor.selectionStart,
+      end: editor.selectionEnd,
+      content: editor.value
+    };
+  }
+
+  async function handleInlineImageChange(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setInlineImageError('');
+    setInlineImageMessage('');
+    if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+      setInlineImageError('Choose a JPEG, PNG or WebP image.');
+      return;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      setInlineImageError('Images must be 5 MB or smaller.');
+      return;
+    }
+
+    setInlineImageProgress(0);
+    setInlineImageUploading(true);
+    try {
+      const uploaded = await uploadImage(file, setInlineImageProgress);
+      if (!isAllowedInlineImageUrl(uploaded?.url)) {
+        throw new Error('The upload did not return a valid HTTPS Cloudinary image URL.');
+      }
+
+      const imageMarkup = createInlineImageMarkup(uploaded.url);
+      setArticle((current) => {
+        const selection = contentSelectionRef.current;
+        const selectionRetained = selection?.content === current.content;
+        const start = selectionRetained
+          ? Math.min(selection.start, current.content.length)
+          : current.content.length;
+        const end = selectionRetained
+          ? Math.min(selection.end, current.content.length)
+          : current.content.length;
+        const before = current.content.slice(0, start);
+        const after = current.content.slice(end);
+        const beforeSeparator = !before || before.endsWith('\n\n')
+          ? ''
+          : before.endsWith('\n') ? '\n' : '\n\n';
+        const afterSeparator = !after || after.startsWith('\n\n')
+          ? ''
+          : after.startsWith('\n') ? '\n' : '\n\n';
+        const inserted = `${before}${beforeSeparator}${imageMarkup}${afterSeparator}${after}`;
+        pendingContentCursorRef.current = before.length + beforeSeparator.length + imageMarkup.length;
+        return { ...current, content: inserted };
+      });
+      setNotice('');
+      setInlineImageMessage('Image inserted into the story.');
+    } catch (uploadFailure) {
+      setInlineImageError(uploadFailure.message || 'The image could not be uploaded.');
+    } finally {
+      setInlineImageUploading(false);
     }
   }
 
@@ -276,18 +364,57 @@ export default function AdminArticleEditorPage() {
               <small>{article.summary.length} characters</small>
             </label>
 
-            <label className="admin-field">
-              <span>Full article <b aria-hidden="true">*</b></span>
+            <input
+              ref={inlineImageInputRef}
+              className="admin-inline-image-input"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              aria-label="Choose image to insert into story"
+              disabled={inlineImageUploading}
+              onChange={handleInlineImageChange}
+            />
+            <div className="admin-field">
+              <label htmlFor="admin-article-content">
+                Full article <b aria-hidden="true">*</b>
+              </label>
+              <div className="admin-inline-image-actions">
+                <button
+                  type="button"
+                  className="admin-button admin-button--secondary"
+                  disabled={inlineImageUploading}
+                  onMouseDown={() => rememberContentSelection(true)}
+                  onClick={() => inlineImageInputRef.current?.click()}
+                >
+                  {inlineImageUploading ? 'Uploading image…' : 'Insert image into story'}
+                </button>
+                {inlineImageUploading && (
+                  <div className="admin-inline-image-progress" role="status" aria-live="polite">
+                    <span>Uploading image · {inlineImageProgress}%</span>
+                    <progress max="100" value={inlineImageProgress}>{inlineImageProgress}%</progress>
+                  </div>
+                )}
+                {inlineImageMessage && <p className="admin-upload-success" role="status">{inlineImageMessage}</p>}
+                {inlineImageError && <p className="admin-form-error" role="alert">{inlineImageError}</p>}
+              </div>
               <textarea
+                ref={contentEditorRef}
+                id="admin-article-content"
                 className="admin-content-editor"
                 required
                 rows={17}
                 placeholder="Write the full story. Add context, quotes and verified details."
                 value={article.content}
-                onChange={(event) => updateField('content', event.target.value)}
+                onChange={(event) => {
+                  rememberContentSelection();
+                  updateField('content', event.target.value);
+                }}
+                onSelect={rememberContentSelection}
+                onBlur={rememberContentSelection}
+                onKeyUp={rememberContentSelection}
+                onClick={rememberContentSelection}
               />
-              <small>Plain text paragraphs are preserved in the article preview.</small>
-            </label>
+              <small>Plain-text paragraphs and line breaks are preserved. Inserted images stay at their position in the story.</small>
+            </div>
           </section>
         </div>
 
@@ -300,7 +427,7 @@ export default function AdminArticleEditorPage() {
             <button
               type="button"
               className="admin-button admin-button--secondary admin-full-button"
-              disabled={saving || uploading}
+              disabled={saving || uploading || inlineImageUploading}
               onClick={() => saveArticle('draft')}
             >
               {saving ? 'Saving…' : isEditing && article.status === 'published' ? 'Unpublish' : 'Save draft'}
@@ -308,7 +435,7 @@ export default function AdminArticleEditorPage() {
             <button
               type="button"
               className="admin-button admin-button--primary admin-full-button"
-              disabled={saving || uploading}
+              disabled={saving || uploading || inlineImageUploading}
               onClick={() => saveArticle('published')}
             >
               {saving ? 'Saving…' : article.status === 'published' ? 'Save & publish' : 'Publish article'}
