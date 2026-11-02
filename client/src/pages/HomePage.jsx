@@ -89,6 +89,7 @@ export default function HomePage() {
                     src={featured.cover_image_url}
                     alt=""
                     priority
+                    articleSlug={featured.slug}
                     className="featured-image"
                   />
                 </Link>
@@ -220,7 +221,7 @@ function SupportingStory({ article, index }) {
         to={`/news/${encodeURIComponent(article.slug)}`}
         aria-label={`Read story: ${article.title}`}
       >
-        <StoryImage src={article.cover_image_url} alt="" />
+        <StoryImage src={article.cover_image_url} alt="" articleSlug={article.slug} />
       </Link>
       <div className="supporting-story-copy">
         <ArticleMeta article={article} />

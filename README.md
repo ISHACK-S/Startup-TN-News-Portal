@@ -71,6 +71,14 @@ npm run provision-admin
 
 Enter the admin name and email at the prompts; enter and confirm the password using hidden terminal input. The provisioning script uses a database advisory lock, refuses to proceed if an admin already exists, hashes the password with bcrypt, stores only the hash, and closes its database connection. Passwords must be at most 72 UTF-8 bytes. Do not put credentials in command-line arguments, commit them, or leave temporary environment credentials in a shared environment.
 
+To update the email and password of an existing administrator, run this from the repository root in an interactive terminal:
+
+```powershell
+npm run update-admin-credentials
+```
+
+Enter the current admin email, the new email, then the new password twice using hidden terminal input. The password must be at least 12 characters, include lowercase and uppercase letters, a number, and a symbol, and use no more than 72 UTF-8 bytes. The command refuses to create an account, preserves the administrator ID and related records, and invalidates only sessions belonging to that administrator. After it confirms success, verify the new credentials at `/admin/login`. Do not run this command as part of automated tests or against production unless you intend to change the account.
+
 Sessions are persisted in the MySQL `admin_sessions` table (not Express's in-memory store), expire after eight hours, and are shared across backend instances. Production cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`; the server trusts one HTTPS reverse-proxy hop. Deploy the browser client and API on the same **site** (same registrable domain, for example `news.example.com` and `api.example.com`) so the strict cookie works. The API's credentialed CORS origin must be exactly the frontend origin. Do not rely on unrelated provider domains such as `*.vercel.app` and `*.onrender.com` for cookie-based admin access.
 
 ## Cloudinary uploads

@@ -1,7 +1,16 @@
 import { useState } from 'react';
 
-export default function StoryImage({ src, alt, className = '', priority = false }) {
+const posterArtworkSlugs = new Set(['biobridge']);
+
+export default function StoryImage({
+  src,
+  alt,
+  className = '',
+  priority = false,
+  articleSlug
+}) {
   const [failed, setFailed] = useState(false);
+  const [preserveFullImage, setPreserveFullImage] = useState(false);
 
   if (!src || failed) {
     return (
@@ -19,6 +28,13 @@ export default function StoryImage({ src, alt, className = '', priority = false 
       alt={alt || ''}
       loading={priority ? 'eager' : 'lazy'}
       fetchPriority={priority ? 'high' : 'auto'}
+      data-image-fit={preserveFullImage ? 'contain' : undefined}
+      onLoad={(event) => {
+        const { naturalWidth, naturalHeight } = event.currentTarget;
+        setPreserveFullImage(
+          posterArtworkSlugs.has(articleSlug) || naturalWidth / naturalHeight >= 2.05
+        );
+      }}
       onError={() => setFailed(true)}
     />
   );

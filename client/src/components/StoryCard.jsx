@@ -19,6 +19,7 @@ export default function StoryCard({ article, featured = false, index = 0 }) {
           src={article.cover_image_url}
           alt=""
           priority={featured}
+          articleSlug={article.slug}
         />
       </Link>
       <div className="story-card-copy">
