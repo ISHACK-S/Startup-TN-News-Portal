@@ -48,10 +48,10 @@ export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
   return payload;
 }
 
-export function uploadImage(file, onProgress = () => {}) {
+function uploadImageTo(file, path, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open('POST', `${API_URL}/admin/uploads`);
+    request.open('POST', `${API_URL}${path}`);
     request.withCredentials = true;
     request.setRequestHeader('Accept', 'application/json');
     request.upload.addEventListener('progress', (event) => {
@@ -88,4 +88,12 @@ export function uploadImage(file, onProgress = () => {}) {
     data.append('image', file);
     request.send(data);
   });
+}
+
+export function uploadImage(file, onProgress = () => {}) {
+  return uploadImageTo(file, '/admin/uploads', onProgress);
+}
+
+export function uploadMediaImage(file, onProgress = () => {}) {
+  return uploadImageTo(file, '/admin/media/uploads', onProgress);
 }

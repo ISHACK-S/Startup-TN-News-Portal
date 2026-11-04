@@ -7,8 +7,10 @@ import NewsSearch from '../components/NewsSearch.jsx';
 import RevealSection from '../components/RevealSection.jsx';
 import StoryImage from '../components/StoryImage.jsx';
 import { ErrorState, LoadingArticle } from '../components/NewsStates.jsx';
+import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function ArticlePage() {
+  const { language, translate: t } = usePublicPreferences();
   const { slug } = useParams();
   const navigate = useNavigate();
   const [article, setArticle] = useState(null);
@@ -85,10 +87,10 @@ export default function ArticlePage() {
     return (
       <div className="site-shell article-error">
         <ErrorState
-          message={error || 'This story may have moved or is no longer available.'}
+          message={t(error || 'This story may have moved, or is no longer available.')}
           onRetry={error ? () => setAttempt((value) => value + 1) : undefined}
         />
-        <Link className="text-link" to="/news/">← Back to latest news</Link>
+        <Link className="text-link" to="/news/">← {t('Back to latest news')}</Link>
       </div>
     );
   }
@@ -108,7 +110,7 @@ export default function ArticlePage() {
       <div
         className="reading-progress"
         role="progressbar"
-        aria-label="Article reading progress"
+        aria-label={t('Article reading progress')}
         aria-valuemin="0"
         aria-valuemax="100"
         aria-valuenow={Math.round(readingProgress)}
@@ -124,15 +126,15 @@ export default function ArticlePage() {
         />
         <div className="article-cover-shade" />
         <div className="article-heading site-shell">
-          <nav className="article-breadcrumbs" aria-label="Breadcrumb">
-            <Link to="/">Home</Link>
+          <nav className="article-breadcrumbs" aria-label={t('Breadcrumb')}>
+            <Link to="/">{t('Home')}</Link>
             <span aria-hidden="true">/</span>
-            <Link to="/news/">News</Link>
+            <Link to="/news/">{t('News')}</Link>
             {article.category_name && (
               <>
                 <span aria-hidden="true">/</span>
                 <Link to={article.category_slug ? `/news/?category=${article.category_slug}` : '/news/'}>
-                  {article.category_name}
+                  {t(article.category_name)}
                 </Link>
               </>
             )}
@@ -141,9 +143,9 @@ export default function ArticlePage() {
           <h1>{article.title}</h1>
           {article.summary && <p className="article-dek">{article.summary}</p>}
           <div className="article-byline">
-            <span>By <strong>{article.author_name}</strong></span>
+            <span>{t('By')} <strong>{article.author_name}</strong></span>
             <span aria-hidden="true" className="byline-dot" />
-            <span>{readingMinutes} min read</span>
+            <span>{readingMinutes} {t('min read')}</span>
           </div>
         </div>
         <span className="article-cover-mark" aria-hidden="true">STARTUPTN / NEWS</span>
@@ -153,58 +155,58 @@ export default function ArticlePage() {
         <div className="article-layout">
           <div className="article-body">
             <div className="article-body-heading">
-              <span className="eyebrow">The story</span>
+              <span className="eyebrow">{t('The story')}</span>
               <span className="article-body-rule" aria-hidden="true" />
-              <span className="article-body-reading">{readingMinutes} min read</span>
+              <span className="article-body-reading">{readingMinutes} {t('min read')}</span>
             </div>
             <div ref={readingAreaRef} className="article-reading-area">
               <ArticleContent content={article.content} />
               {article.source_url && (
                 <p className="source-attribution">
-                  Source: <a href={article.source_url} target="_blank" rel="noopener noreferrer">{article.source_url}</a>
+                  {t('Source:')} <a href={article.source_url} target="_blank" rel="noopener noreferrer">{article.source_url}</a>
                 </p>
               )}
             </div>
-            <div className="share-row" aria-label="Share this story">
-              <span>Share this story</span>
-              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on Facebook">f</a>
-              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on LinkedIn">in</a>
-              <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(articleUrl)}&text=${shareText}`} target="_blank" rel="noopener noreferrer" aria-label="Share on X">𝕏</a>
-              <a href={`mailto:?subject=${shareText}&body=${encodeURIComponent(articleUrl)}`} aria-label="Share by email">✉</a>
+            <div className="share-row" aria-label={t('Share this story')}>
+              <span>{t('Share this story')}</span>
+              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on Facebook')}>f</a>
+              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on LinkedIn')}>in</a>
+              <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(articleUrl)}&text=${shareText}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on X')}>𝕏</a>
+              <a href={`mailto:?subject=${shareText}&body=${encodeURIComponent(articleUrl)}`} aria-label={t('Share by email')}>✉</a>
             </div>
           </div>
-          <aside className="article-sidebar" aria-label="More from the newsroom">
+          <aside className="article-sidebar" aria-label={t('More from the newsroom')}>
             <section className="article-sidebar-panel article-search-panel">
-              <span className="eyebrow">Explore the newsroom</span>
-              <h2>Find a story</h2>
+              <span className="eyebrow">{t('Explore the newsroom')}</span>
+              <h2>{t('Find a story')}</h2>
               <NewsSearch onSearch={(query) => navigate(`/news/${query ? `?q=${encodeURIComponent(query)}` : ''}`)} />
             </section>
             <section className="article-sidebar-panel article-info-panel">
-              <span className="eyebrow">The details</span>
-              <h2>About this story</h2>
+              <span className="eyebrow">{t('The details')}</span>
+              <h2>{t('About this story')}</h2>
               <dl>
-                <div><dt>Published</dt><dd>{formatDate(article.published_at || article.created_at)}</dd></div>
-                <div><dt>Written by</dt><dd>{article.author_name}</dd></div>
-                <div><dt>Reading time</dt><dd>{readingMinutes} min</dd></div>
-                {article.category_name && <div><dt>Section</dt><dd>{article.category_name}</dd></div>}
+                <div><dt>{t('Published')}</dt><dd>{formatDate(article.published_at || article.created_at, language)}</dd></div>
+                <div><dt>{t('Written by')}</dt><dd>{article.author_name}</dd></div>
+                <div><dt>{t('Reading time')}</dt><dd>{readingMinutes} {t('min')}</dd></div>
+                {article.category_name && <div><dt>{t('Section')}</dt><dd>{t(article.category_name)}</dd></div>}
               </dl>
               {article.source_url && (
                 <a className="article-sidebar-source" href={article.source_url} target="_blank" rel="noopener noreferrer">
-                  View original source <span aria-hidden="true">↗</span>
+                  {t('View original source')} <span aria-hidden="true">↗</span>
                 </a>
               )}
             </section>
             <section className="article-sidebar-panel article-recent-panel">
               <div className="article-sidebar-heading">
-                <div><span className="eyebrow">Fresh from the desk</span><h2>Recent stories</h2></div>
-                <Link to="/news/" aria-label="Browse all recent stories">All news <span aria-hidden="true">→</span></Link>
+                <div><span className="eyebrow">{t('Fresh from the desk')}</span><h2>{t('Recent stories')}</h2></div>
+                <Link to="/news/" aria-label={t('Browse all recent stories')}>{t('All news')} <span aria-hidden="true">→</span></Link>
               </div>
-              {recentStoriesError && <p className="article-sidebar-note">Recent stories are temporarily unavailable.</p>}
+              {recentStoriesError && <p className="article-sidebar-note">{t('Recent stories are temporarily unavailable.')}</p>}
               {!recentStoriesError && recommendations.slice(0, 2).map((story) => (
                 <RecentStory key={story.id} story={story} />
               ))}
               {!recentStoriesError && recommendations.length === 0 && (
-                <p className="article-sidebar-note">More reporting from the newsroom will appear here soon.</p>
+                <p className="article-sidebar-note">{t('More reporting from the newsroom will appear here soon.')}</p>
               )}
             </section>
           </aside>
@@ -212,8 +214,8 @@ export default function ArticlePage() {
         {recommendations.length > 0 && (
           <RevealSection className="article-related" aria-labelledby="article-related-heading">
             <div className="article-related-heading">
-              <div><span className="eyebrow">Continue exploring</span><h2 id="article-related-heading">More from the newsroom</h2></div>
-              <Link className="text-link" to="/news/">All stories <span aria-hidden="true">→</span></Link>
+              <div><span className="eyebrow">{t('Continue exploring')}</span><h2 id="article-related-heading">{t('More from the newsroom')}</h2></div>
+              <Link className="text-link" to="/news/">{t('All stories')} <span aria-hidden="true">→</span></Link>
             </div>
             <div className="article-related-grid">
               {recommendations.map((story, index) => (
@@ -228,12 +230,13 @@ export default function ArticlePage() {
 }
 
 function RecentStory({ story, index = 0 }) {
+  const { translate: t } = usePublicPreferences();
   return (
     <article className="article-recent-story" data-reveal-item="" style={{ '--story-order': index }}>
       <Link
         className="article-recent-image"
         to={`/news/${encodeURIComponent(story.slug)}`}
-        aria-label={`Read story: ${story.title}`}
+        aria-label={`${t('Read story')}: ${story.title}`}
       >
         <StoryImage src={story.cover_image_url} alt="" />
       </Link>

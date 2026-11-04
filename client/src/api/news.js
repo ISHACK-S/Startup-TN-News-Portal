@@ -41,3 +41,21 @@ export function getNews({ page = 1, limit = 9, q, category, signal } = {}) {
 export function getArticle(slug, { signal } = {}) {
   return request(`/news/${encodeURIComponent(slug)}`, { signal }).then((result) => result.data);
 }
+
+export function getPublicWebStories({ page = 1, limit = 20, q, signal } = {}) {
+  const search = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (q) search.set('q', q);
+  return request(`/web-stories?${search}`, { signal });
+}
+
+export function getPublicWebStory(slug, { signal } = {}) {
+  return request(`/web-stories/${encodeURIComponent(slug)}`, { signal }).then((result) => result.data);
+}
+
+export function getPublicHeroSlides({ signal } = {}) {
+  return request('/hero-slides?page=1&limit=50', { signal });
+}
+
+export function getPublicVideos({ page = 1, limit = 20, signal } = {}) {
+  return request(`/videos?page=${page}&limit=${limit}`, { signal });
+}

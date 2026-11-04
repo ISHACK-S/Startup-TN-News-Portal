@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom';
 import ArticleMeta from './ArticleMeta.jsx';
 import StoryImage from './StoryImage.jsx';
+import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function StoryCard({ article, featured = false, index = 0 }) {
+  const { translate: t } = usePublicPreferences();
   return (
     <article
       className={`story-card${featured ? ' story-card--featured' : ''}`}
@@ -12,7 +14,7 @@ export default function StoryCard({ article, featured = false, index = 0 }) {
       <Link
         className="story-card-image-link"
         to={`/news/${encodeURIComponent(article.slug)}`}
-        aria-label={`Read story: ${article.title}`}
+        aria-label={`${t('Read story')}: ${article.title}`}
       >
         <StoryImage
           className="story-card-image"
@@ -29,7 +31,7 @@ export default function StoryCard({ article, featured = false, index = 0 }) {
         </h3>
         {article.summary && <p className="story-card-summary">{article.summary}</p>}
         <Link className="text-link" to={`/news/${encodeURIComponent(article.slug)}`}>
-          Read story <span aria-hidden="true">→</span>
+          {t('Read story')} <span aria-hidden="true">→</span>
         </Link>
       </div>
     </article>

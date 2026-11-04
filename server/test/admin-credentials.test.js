@@ -5,6 +5,7 @@ import {
   parseCredentialUpdate,
   updateAdminCredentials
 } from '../scripts/admin-credentials.js';
+import { adminPasswordSchema } from '../src/validation/admin-password.js';
 
 const validInput = {
   currentEmail: ' OLD.ADMIN@example.com ',
@@ -14,6 +15,13 @@ const validInput = {
 };
 
 describe('admin credential update validation', () => {
+  it('uses the same strong policy for newly provisioned and updated passwords', () => {
+    assert.equal(adminPasswordSchema.safeParse('StrongPass123!').success, true);
+    for (const password of ['short', 'AllLettersOnly', `StrongPass123!${'x'.repeat(60)}`]) {
+      assert.equal(adminPasswordSchema.safeParse(password).success, false);
+    }
+  });
+
   it('normalizes email addresses and leaves passwords unchanged', () => {
     assert.deepEqual(parseCredentialUpdate(validInput), {
       currentEmail: 'old.admin@example.com',

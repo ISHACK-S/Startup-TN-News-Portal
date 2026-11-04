@@ -1,7 +1,9 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function NewsTicker({ articles }) {
+  const { translate: t } = usePublicPreferences();
   const viewportRef = useRef(null);
   const groupRef = useRef(null);
   const [looping, setLooping] = useState(false);
@@ -34,10 +36,10 @@ export default function NewsTicker({ articles }) {
   }, [articles]);
 
   return (
-    <nav className={`news-ticker${looping ? ' news-ticker--looping' : ''}`} aria-label="Recent headlines">
+    <nav className={`news-ticker${looping ? ' news-ticker--looping' : ''}`} aria-label={t('Recent headlines')}>
       <span className="news-ticker-label">
         <i aria-hidden="true" />
-        <span>Latest</span>
+        <span>{t('Latest')}</span>
       </span>
       {articles.length > 0 ? (
         <div className="news-ticker-items" ref={viewportRef}>
@@ -57,7 +59,7 @@ export default function NewsTicker({ articles }) {
                   <Link key={article.id} to={`/news/${encodeURIComponent(article.slug)}`}>
                     <span className="news-ticker-title">{article.title}</span>
                     {article.category_name && (
-                      <span className="news-ticker-meta">{article.category_name}</span>
+                      <span className="news-ticker-meta">{t(article.category_name)}</span>
                     )}
                   </Link>
                 ))}
@@ -66,10 +68,10 @@ export default function NewsTicker({ articles }) {
           </div>
         </div>
       ) : (
-        <p className="news-ticker-empty">Published stories from the Tamil Nadu startup ecosystem.</p>
+        <p className="news-ticker-empty">{t('Published stories from the Tamil Nadu startup ecosystem.')}</p>
       )}
-      <Link className="news-ticker-more" to="/news/" aria-label="Browse all latest headlines">
-        All news <span aria-hidden="true">↗</span>
+      <Link className="news-ticker-more" to="/news/" aria-label={t('Browse all latest headlines')}>
+        {t('All news')} <span aria-hidden="true">↗</span>
       </Link>
     </nav>
   );

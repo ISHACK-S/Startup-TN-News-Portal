@@ -61,6 +61,26 @@ On the production host, provide the CA as a protected secret file/mount and set 
 
 The schema is managed manually. `database/schema.sql` creates the `admins`, `admin_sessions`, `categories`, and `articles` tables and inserts the six categories using a non-destructive upsert. Do not run destructive migrations against production. The schema must be initialized and verified before the API can serve database-backed endpoints or sessions.
 
+## Admin authorization migration
+
+The versioned migration `database/migrations/001_admin_authorization.sql` adds the `role`, `is_active`, and `auth_version` fields to existing admin accounts. Existing accounts receive the `Admin` role; the migration does not change account IDs, password hashes, article rows, or session data. The runner creates and checks the `schema_migrations` ledger, uses a MySQL advisory lock, verifies the resulting column definitions, and safely recognizes a completed migration on repeat runs. An incomplete or conflicting schema fails closed for manual review.
+
+Back up the target database and verify the backend's configured Aiven connection before running this command from the repository root. It is not run automatically during application startup:
+
+```powershell
+npm run migrate-admin-authorization
+```
+
+Apply and verify the migration before deploying the authorization code. New databases should use the updated `database/schema.sql`; existing databases should use the versioned migration rather than reapplying the base schema.
+
+After confirming the intended account is an active `Admin`, assign the initial Super Admin from a trusted interactive terminal:
+
+```powershell
+npm run promote-initial-super-admin
+```
+
+The command verifies the account, requires an exact typed confirmation, refuses if a Super Admin already exists, and invalidates only the selected account's sessions while updating its authorization version. It does not create an account or accept a password. Do not assign roles by editing session data or exposing role assignment publicly. Admin and Super Admin can use the existing editorial and image-upload APIs; `requireSuperAdmin` is reserved for future account and configuration management routes.
+
 ## Admin provisioning and sessions
 
 There is no public registration. To provision the first admin, run this once from an interactive terminal after Aiven and the schema are ready:
@@ -69,7 +89,7 @@ There is no public registration. To provision the first admin, run this once fro
 npm run provision-admin
 ```
 
-Enter the admin name and email at the prompts; enter and confirm the password using hidden terminal input. The provisioning script uses a database advisory lock, refuses to proceed if an admin already exists, hashes the password with bcrypt, stores only the hash, and closes its database connection. Passwords must be at most 72 UTF-8 bytes. Do not put credentials in command-line arguments, commit them, or leave temporary environment credentials in a shared environment.
+Enter the admin name and email at the prompts; enter and confirm the password using hidden terminal input. The provisioning script uses a database advisory lock, refuses to proceed if an admin already exists, hashes the password with bcrypt, stores only the hash, and closes its database connection. New passwords must be at least 12 characters, include lowercase and uppercase letters, a number, and a symbol, and use no more than 72 UTF-8 bytes. The same policy applies when updating credentials. Existing passwords are not changed by the role migration. Do not put credentials in command-line arguments, commit them, or leave temporary environment credentials in a shared environment.
 
 To update the email and password of an existing administrator, run this from the repository root in an interactive terminal:
 
@@ -77,13 +97,165 @@ To update the email and password of an existing administrator, run this from the
 npm run update-admin-credentials
 ```
 
-Enter the current admin email, the new email, then the new password twice using hidden terminal input. The password must be at least 12 characters, include lowercase and uppercase letters, a number, and a symbol, and use no more than 72 UTF-8 bytes. The command refuses to create an account, preserves the administrator ID and related records, and invalidates only sessions belonging to that administrator. After it confirms success, verify the new credentials at `/admin/login`. Do not run this command as part of automated tests or against production unless you intend to change the account.
+Enter the current admin email, the new email, then the new password twice using hidden terminal input. New passwords follow the shared policy above. The command refuses to create an account, preserves the administrator ID and related records, and invalidates only sessions belonging to that administrator. After it confirms success, verify the new credentials at `/admin/login`. Do not run this command as part of automated tests or against production unless you intend to change the account.
 
 Sessions are persisted in the MySQL `admin_sessions` table (not Express's in-memory store), expire after eight hours, and are shared across backend instances. Production cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`; the server trusts one HTTPS reverse-proxy hop. Deploy the browser client and API on the same **site** (same registrable domain, for example `news.example.com` and `api.example.com`) so the strict cookie works. The API's credentialed CORS origin must be exactly the frontend origin. Do not rely on unrelated provider domains such as `*.vercel.app` and `*.onrender.com` for cookie-based admin access.
+
+## Super Admin Access Control API
+
+The backend exposes account creation, listing, and role/active-status updates for the User Management interface. All endpoints require an authenticated **Super Admin**; regular Admins receive `403`, and unauthenticated requests receive `401`.
+
+Super Admins can create accounts with `POST /api/admin/access-control/users`. The request accepts `name`, `email`, `password`, `role` (`Admin` or `Super Admin`), and optional `isActive` (defaults to `true`). Email addresses are trimmed and lowercased; password policy is the same as the interactive provisioning tools. The password is bcrypt-hashed, and the response contains only safe account fields. New accounts inherit the selected role's permissions without per-account overrides. Creating a Super Admin additionally requires `"confirmSuperAdmin": true`; an inactive account cannot sign in until reactivated.
+
+```http
+POST /api/admin/access-control/users
+Content-Type: application/json
+
+{
+  "name": "Editorial Admin",
+  "email": "editor@example.com",
+  "password": "Strong-password-123!",
+  "role": "Admin",
+  "isActive": true
+}
+```
+
+```http
+GET /api/admin/access-control/users?page=1&limit=10&q=editor
+```
+
+The optional `page` (default `1`), `limit` (default `10`, maximum `50`), and `q` (name/email search) parameters provide pagination and search. The response includes only account ID, name, email, role, active status, creation date, and pagination metadata:
+
+```json
+{
+  "data": [
+    {
+      "id": "12",
+      "name": "Editorial Admin",
+      "email": "editor@example.com",
+      "role": "Admin",
+      "isActive": true,
+      "createdAt": "2026-01-02T03:04:05.000Z"
+    }
+  ],
+  "pagination": { "page": 1, "limit": 10, "total": 1, "totalPages": 1 }
+}
+```
+
+```http
+PATCH /api/admin/access-control/users/12
+Content-Type: application/json
+
+{ "role": "Super Admin", "isActive": true }
+```
+
+The update body must contain at least one of `role` (`Admin` or `Super Admin`) and `isActive` (boolean); unknown fields are rejected. The response returns the safe account representation in `data` and reports whether it changed and how many sessions were invalidated in `meta`:
+
+```json
+{
+  "data": {
+    "id": "12",
+    "name": "Editorial Admin",
+    "email": "editor@example.com",
+    "role": "Super Admin",
+    "isActive": true,
+    "createdAt": "2026-01-02T03:04:05.000Z"
+  },
+  "meta": { "changed": true, "sessionsInvalidated": 2 }
+}
+```
+
+Any actual role or active-status change increments the account's authorization version and invalidates **only that account's existing sessions**. The update transaction locks the admin rows while checking the result, preventing concurrent changes from leaving the system without an active Super Admin. The last active Super Admin cannot be demoted or deactivated, and operators cannot demote or deactivate their own account.
+
+## Permission foundation
+
+Migration `002_admin_permissions.sql` adds the permission registry and permission data while preserving the existing `admins` accounts, articles, categories, and sessions. Migration `003_enable_role_builder.sql` marks the now-implemented Role Builder module available and active; its Admin role limit remains denied, and Super Admin retains its built-in access. Migration `004_content_management.sql` adds the media asset registry, Web Stories and slides, hero slides, video records, and enables the four implemented content/media modules. The runner applies and verifies migrations `001_admin_authorization` through `004_content_management` in order. **Do not run it against a live database until an operator has verified the target, taken a backup, and scheduled the rollout.** It is never run automatically on application startup.
+
+For a safe rollout, first back up the target MySQL database and confirm the server's configured database and TLS connection without exposing credentials. Apply the migration from a trusted environment only after checking that the target is correct:
+
+```powershell
+npm run migrate-admin-authorization
+```
+
+The runner uses a MySQL advisory lock, records completed versions only after schema and module checks succeed, and verifies schema and seeded registry/permission rows on repeat runs. Migration 004 uses `CREATE TABLE IF NOT EXISTS` so a retry can continue after MySQL implicitly commits earlier DDL; it leaves existing rows and tables intact, removes only the obsolete `chk_hero_slide_destination` check if present, and fails for manual review if an existing table is structurally incomplete. After a failed migration, inspect the target schema and migration ledger, take a backup, then rerun the documented command against the verified target. This task does not run migrations automatically or against Aiven. Keep the existing Super Admin active during rollout; the permission APIs cannot edit built-in Super Admin grants or overrides, and Access Control itself cannot be deactivated.
+
+The registry uses these stable identifiers (not display labels) and marks implementation separately from activation:
+
+| Group | Module identifiers |
+|---|---|
+| Core dashboard | `overview`, `news-articles`, `profile-settings` |
+| Public-service management | `monthly-reports`, `citizen-services`, `faq-management`, `police-stations`, `helplines-registry`, `portal-links` |
+| Content and media | `web-stories`, `hero-slider`, `video-media`, `media-library`, `official-alerts` |
+| Access and account administration | `access-control`, `user-management`, `role-builder`, `session-management`, `security-events`, `audit-logs` |
+| Website configuration | `branding-theme-editor`, `menu-management`, `footer-management`, `seo-management` |
+| System administration | `system-configuration`, `backup-restore`, `api-key-configuration`, `smtp-configuration` |
+
+`overview`, `news-articles`, `access-control`, `user-management`, `role-builder`, `media-library`, `web-stories`, `hero-slider`, and `video-media` are marked implemented after their corresponding migrations are applied; other modules remain registered but unavailable and inactive. The supported actions are `view`, `create`, `edit`, `publish`, `delete`, `manage`, and `configure`.
+
+Effective authorization requires a grant within the role's maximum, an available and active module, and the requested action. Module visibility is derived from effective `view` permission; visibility does not grant other actions. The built-in Admin defaults preserve Overview and the existing article workflow, with other modules denied unless explicitly granted within Admin's limits. Built-in Super Admin grants remain fixed and unrestricted across available modules. Account overrides replace the corresponding role grant but cannot exceed the role limit; Super Admin overrides are prohibited. Missing or inconsistent permission records fail closed. Protected requests re-read current permissions from MySQL, so role and module changes take effect on the next request; account override changes also increment that account's authorization version and invalidate its sessions.
+
+Permission endpoints are under `/api/admin/access-control/permissions`. The authenticated-permissions endpoint `/me` requires any active admin session; all role, module, and account-management endpoints require an authenticated **Super Admin**. Unauthenticated requests receive `401`; an authenticated regular Admin receives `403` for privileged operations.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /me` | Return the authenticated account's effective permissions and module visibility. Requires any active authenticated admin session. |
+| `GET /modules` | List registered modules, including `isAvailable`, `isActive`, and `implementationStatus`. |
+| `PATCH /modules/:moduleId` | Change activation using `{ "isActive": true }`; unavailable modules and Access Control cannot be activated/deactivated, respectively. |
+| `GET /roles` | List registered built-in roles and indicate which role is editable. |
+| `GET /roles/:roleKey/permissions` | Read a role's effective permission matrix (`roleKey` is `admin` or `super-admin`). |
+| `PATCH /roles/:roleKey/permissions` | Update explicit role grants; only `admin` is editable. |
+| `GET /accounts/:adminId/permissions` | Read an account's effective permissions and account status. |
+| `PUT /accounts/:adminId/overrides` | Set or remove account-specific action overrides within that account's role limits. |
+| `DELETE /accounts/:adminId/overrides/:moduleId/:actionId` | Remove one account-specific override. |
+
+`GET /me` is the authenticated, permission-aware source used by the admin shell to determine module visibility and route access. Its response is safe to use for navigation but does not replace server-side authorization. Permission reads include each module's role defaults, account overrides, role limits, effective actions, availability/activation state, and visibility. For account override updates, `isAllowed: true` grants an eligible action, `false` explicitly denies it, and `null` removes the override and restores the role default.
+
+For example, a role update changes only the specified actions; unknown fields, identifiers, roles, and actions are rejected:
+
+```http
+PATCH /api/admin/access-control/permissions/roles/admin/permissions
+Content-Type: application/json
+
+{
+  "permissions": [
+    { "moduleId": "news-articles", "actions": { "publish": true, "delete": false } }
+  ]
+}
+```
+
+```http
+PUT /api/admin/access-control/permissions/accounts/12/overrides
+Content-Type: application/json
+
+{
+  "overrides": [
+    { "moduleId": "news-articles", "actionId": "publish", "isAllowed": false },
+    { "moduleId": "news-articles", "actionId": "delete", "isAllowed": null }
+  ]
+}
+```
+
+Successful responses wrap the result in `data`. Module entries include `moduleId`, `label`, `description`, `navigationGroup`, `isAvailable`, `isActive`, and `implementationStatus`. Effective permission entries additionally include `roleActions`, `limits`, nullable `overrides`, `actions`, and `isVisible`. Role Builder and Account Permissions use these APIs; the built-in Super Admin grants remain fixed, Admin cannot grant beyond server-defined limits, and account overrides cannot change the built-in Super Admin. The APIs do not create modules, accounts, custom roles, or future module APIs. Remaining registered modules and their UIs are future work; they are not made functional by appearing in the registry.
+
+The admin shell obtains permissions from `/me`; navigation and direct-route guards use the returned effective actions. Server middleware remains authoritative for API calls. The Role Builder is at `/admin/role-builder`, and account-specific permissions are at `/admin/access-control/permissions`; the existing account role/status interface remains at `/admin/access-control/users`. The navigation displays only currently authorized modules with implemented routes. Planned modules are not linked to placeholder screens. Profile Settings is currently unavailable and shown as disabled until that module is implemented. Dashboard article counts and recent articles are shown only when the account has article-view access; no user counts or synthetic system activity are presented.
 
 ## Cloudinary uploads
 
 Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` as backend-only secrets. The service requires all three together. Uploads require an admin session, accept JPEG/PNG/WebP validated from file content, stay in memory, and are capped at 5 MB by default. Hosted assets go to `startuptn-news/articles`; article rows store the hosted HTTPS URL, not image bytes. Replacing or deleting an article does not automatically delete the image asset.
+
+After migration `004_content_management.sql` is applied, successful uploads through the existing article editor and the Media Library uploader are idempotently registered in `media_assets` with Cloudinary public ID, HTTPS URL, image format/dimensions/size when returned, filename, uploader reference, and upload time. `GET /api/admin/media` supports paginated search and format filtering; `GET /api/admin/media/:id` reads a single asset; `POST /api/admin/media/uploads` accepts the same single JPEG/PNG/WebP `image` upload. These routes require `media-library` view/create permissions. Article uploads continue to require `news-articles:create`, preserving the existing workflow.
+
+The registry only indexes successful uploads made after this migration and deployment. Existing Cloudinary files are not automatically discovered or backfilled. Media records are not deletable through this API; removing a database row must never be treated as permission to delete the remote Cloudinary object. Editors with media-library view access can select indexed images in the article, story, hero, and video editors.
+
+## Content and media modules
+
+The Web Stories admin routes under `/api/admin/web-stories` support paginated listing, detail, create, update (including ordered slide replacement), and delete. Creating/editing requires the matching `web-stories` action; publication additionally requires `publish`. A story cannot be published without at least one slide. Public `GET /api/web-stories` and `GET /api/web-stories/:slug` return published stories only, with slides ordered by their saved position. The public routes are presented at `/stories` and `/stories/:slug`.
+
+The Hero Slider admin routes under `/api/admin/hero-slides` support listing, create, update/reordering through `display_order`, publication, and delete with `hero-slider` action permissions. A destination must be either a validated HTTPS URL or a published article reference. Public `GET /api/hero-slides` returns only active published slides, ordered by display order; slides extend the existing homepage featured area and do not create a second hero section. If no public slides exist, the homepage retains its current featured-article presentation. Navigation is manual, keyboard-operable, and does not auto-play.
+
+Video admin routes under `/api/admin/videos` support list, create, update/reordering, publication, and delete with `video-media` action permissions. Source URLs are validated server-side against HTTPS YouTube and Vimeo URL forms; arbitrary iframe HTML and embed URLs are not accepted. The API derives canonical YouTube privacy-enhanced or Vimeo embed URLs. Public `GET /api/videos` returns published records only; the public listing is at `/videos`. Embeds are lazy and require an explicit user action when a poster image is available.
+
+For all four modules, unauthenticated admin requests return `401`; missing module/action permission returns `403`. Super Admin receives the built-in maximum permissions. Admin accounts start denied for these modules and may only be granted actions within their configured role limits. Publishing, deleting, and other writes are checked by the server, not by navigation visibility.
 
 ## Backend deployment (manual)
 
@@ -133,8 +305,8 @@ Common diagnostics:
 
 ## API and data behavior
 
-- Public: `GET /api/categories`, `GET /api/news` (also `/api/news/`) with pagination/search/category filters, and `GET /api/news/:slug`. Public queries return published records only.
+- Public: `GET /api/categories`, `GET /api/news` (also `/api/news/`) with pagination/search/category filters, and `GET /api/news/:slug`. Public queries return published records only. Content additions include `GET /api/hero-slides`, `GET /api/web-stories`, `GET /api/web-stories/:slug`, and `GET /api/videos`; each returns published records only.
 - Authentication: `POST /api/auth/login`, `POST /api/auth/logout`, and `GET /api/auth/me`.
-- Admin: authenticated article list/read/create/update/delete under `/api/admin/articles` and image upload at `/api/admin/uploads`.
+- Admin: authenticated article list/read/create/update/delete under `/api/admin/articles` and image upload at `/api/admin/uploads`. Media Library, Web Stories, Hero Slider, and Video & Media admin APIs are protected by their corresponding module/action permissions.
 - Article status is restricted to `draft`/`published`; publication timestamps are server-managed. Slugs and admin/category names have unique constraints. All SQL values use prepared statements.
 - Success uses `{ "data": ... }`; errors use `{ "error": { "message": "...", "details": [...] } }`.

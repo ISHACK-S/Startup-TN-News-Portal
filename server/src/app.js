@@ -13,6 +13,14 @@ import { MySqlSessionStore } from './database/session-store.js';
 import { pool } from './database/pool.js';
 import { healthRouter } from './routes/health.routes.js';
 import { adminUploadRouter } from './routes/admin-uploads.routes.js';
+import { adminAccessControlRouter } from './routes/admin-access-control.routes.js';
+import { adminPermissionsRouter } from './routes/admin-permissions.routes.js';
+import {
+  adminHeroSlidesRouter,
+  adminMediaRouter,
+  adminVideosRouter,
+  adminWebStoriesRouter
+} from './routes/admin-content.routes.js';
 
 export function createApp({
   database = pool,
@@ -53,6 +61,12 @@ export function createApp({
   app.use('/api', publicRouter);
   app.use('/api/admin/uploads', adminUploadRouter);
   app.use('/api/admin/articles', adminArticleRouter);
+  app.use('/api/admin/access-control', adminAccessControlRouter);
+  app.use('/api/admin/access-control/permissions', adminPermissionsRouter);
+  app.use('/api/admin/media', adminMediaRouter);
+  app.use('/api/admin/web-stories', adminWebStoriesRouter);
+  app.use('/api/admin/hero-slides', adminHeroSlidesRouter);
+  app.use('/api/admin/videos', adminVideosRouter);
 
   app.use(notFound);
   app.use(errorHandler);

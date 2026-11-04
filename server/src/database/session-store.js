@@ -3,6 +3,15 @@ import session from 'express-session';
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
 
+export async function deleteAdminSessions(database, adminId) {
+  const [result] = await database.execute(
+    `DELETE FROM admin_sessions
+     WHERE JSON_UNQUOTE(JSON_EXTRACT(session_data, '$.adminId')) = ?`,
+    [String(adminId)]
+  );
+  return result.affectedRows;
+}
+
 export class MySqlSessionStore extends session.Store {
   constructor(database) {
     super();

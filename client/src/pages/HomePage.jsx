@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getNews } from '../api/news.js';
+import { getPublicHeroSlides } from '../api/news.js';
 import ArticleMeta from '../components/ArticleMeta.jsx';
 import NewsTicker from '../components/NewsTicker.jsx';
 import RevealSection from '../components/RevealSection.jsx';
 import StoryCard from '../components/StoryCard.jsx';
 import StoryImage from '../components/StoryImage.jsx';
+import HomeHeroSlider from '../components/HomeHeroSlider.jsx';
 import { EmptyState, ErrorState } from '../components/NewsStates.jsx';
+import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function HomePage() {
+  const { translate: t } = usePublicPreferences();
   const [result, setResult] = useState(null);
+  const [heroSlides, setHeroSlides] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
@@ -18,8 +23,17 @@ export default function HomePage() {
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    getNews({ page: 1, limit: 9, signal: controller.signal })
-      .then(setResult)
+    Promise.all([
+      getPublishedArticles(controller.signal),
+      getPublicHeroSlides({ signal: controller.signal }).catch((failure) => {
+        if (failure.name === 'AbortError') throw failure;
+        return { data: [] };
+      })
+    ])
+      .then(([news, slider]) => {
+        setResult(news);
+        setHeroSlides(slider.data ?? []);
+      })
       .catch((fetchError) => {
         if (fetchError.name !== 'AbortError') setError(fetchError.message);
       })
@@ -29,17 +43,21 @@ export default function HomePage() {
     return () => controller.abort();
   }, [attempt]);
 
-  const articles = result?.data ?? [];
+  const fetchedArticles = result?.data ?? [];
+  const articles = fetchedArticles.slice(0, 9);
   const featured = useMemo(
-    () => articles.find((article) => article.is_featured) ?? articles[0],
-    [articles]
+    () => fetchedArticles.find((article) => article.is_featured) ?? fetchedArticles[0],
+    [fetchedArticles]
   );
-  const supporting = useMemo(
-    () => articles.filter((article) => article.id !== featured?.id).slice(0, 3),
-    [articles, featured]
+  const recentArticles = useMemo(
+    () => [...fetchedArticles].sort(
+      (a, b) => Date.parse(b.published_at) - Date.parse(a.published_at)
+    ),
+    [fetchedArticles]
   );
+  const moreHeadlines = useMemo(() => recentArticles.slice(0, 10), [recentArticles]);
   const latest = articles.filter((article) => article.id !== featured?.id);
-  const tickerArticles = articles.slice(0, 5);
+  const tickerArticles = recentArticles.slice(0, 5);
   const trending = articles.filter((article) => article.is_featured && article.id !== featured?.id);
   const categorySections = ['Startups', 'Funding', 'Events', 'Policy', 'Innovation', 'Ecosystem']
     .map((name) => ({
@@ -51,35 +69,31 @@ export default function HomePage() {
 
   return (
     <>
-      <section className="edition-strip">
-        <div className="site-shell edition-inner">
-          <span className="edition-mark" aria-hidden="true" />
-          <p>Latest from Tamil Nadu’s startup ecosystem</p>
-          <Link to="/news/">Explore the latest <span aria-hidden="true">→</span></Link>
+      <div className="home-ticker-band">
+        <div className="site-shell home-ticker-shell">
+          <NewsTicker articles={tickerArticles} />
         </div>
-      </section>
+      </div>
       <div className="site-shell home-content">
         {loading && <HomeLoading />}
         {!loading && error && <ErrorState message={error} onRetry={() => setAttempt((value) => value + 1)} />}
-        {!loading && !error && !featured && (
-          <section className="home-empty-wrap" aria-label="No published stories">
+        {!loading && !error && !featured && !heroSlides.length && (
+          <section className="home-empty-wrap" aria-label={t('No published stories')}>
             <EmptyState
               title="The newsroom is getting ready."
-              message="There are no published stories just yet. Check back soon for verified news and updates from Tamil Nadu’s startup ecosystem."
+              message={t('There are no published stories just yet. Check back soon for verified news and updates from Tamil Nadu’s startup ecosystem.')}
             />
-            <Link className="button button--outline" to="/news/">Explore the newsroom <span aria-hidden="true">→</span></Link>
+            <Link className="button button--outline" to="/news/">{t('Explore the newsroom')} <span aria-hidden="true">→</span></Link>
           </section>
         )}
 
-        {!loading && !error && featured && (
+        {!loading && !error && (featured || heroSlides.length > 0) && (
           <>
-            <NewsTicker articles={tickerArticles} />
-
             <RevealSection
-              className={`front-page-lead${supporting.length === 0 ? ' front-page-lead--solo' : ''}`}
+              className={`front-page-lead${moreHeadlines.length === 0 ? ' front-page-lead--solo' : ''}`}
               aria-labelledby="featured-heading"
             >
-              <div className="front-page-lead-main">
+              {heroSlides.length > 0 ? <HomeHeroSlider slides={heroSlides} /> : <div className="front-page-lead-main">
                 <Link
                   className="featured-image-link"
                   to={`/news/${encodeURIComponent(featured.slug)}`}
@@ -94,31 +108,17 @@ export default function HomePage() {
                   />
                 </Link>
                 <div className="featured-copy">
-                  <span className="eyebrow eyebrow--gold">Featured story</span>
+                  <span className="eyebrow eyebrow--gold">{t('Featured story')}</span>
                   <ArticleMeta article={featured} />
                   <h1 id="featured-heading">
                     <Link to={`/news/${encodeURIComponent(featured.slug)}`}>{featured.title}</Link>
                   </h1>
-                  {featured.summary && <p>{featured.summary}</p>}
                   <Link className="button button--gold" to={`/news/${encodeURIComponent(featured.slug)}`}>
-                    Read the story <span aria-hidden="true">↗</span>
+                    {t('Read the story')} <span aria-hidden="true">↗</span>
                   </Link>
                 </div>
-              </div>
-              <aside className="lead-support" aria-labelledby="lead-support-heading">
-                <div className="section-heading section-heading--row lead-support-heading">
-                  <div>
-                    <span className="eyebrow">The newsroom</span>
-                    <h2 id="lead-support-heading">More headlines</h2>
-                  </div>
-                  <Link className="text-link" to="/news/" aria-label="Browse all latest news">All news →</Link>
-                </div>
-                {supporting.length > 0 ? supporting.map((article) => (
-                  <SupportingStory article={article} key={article.id} />
-                )) : (
-                  <p className="single-story-note">More reporting from the ecosystem will appear here as it is published.</p>
-                )}
-              </aside>
+              </div>}
+              <MoreHeadlines articles={moreHeadlines} />
             </RevealSection>
 
             <RevealSection
@@ -127,11 +127,11 @@ export default function HomePage() {
             >
               <div className="section-heading section-heading--row">
                 <div>
-                  <span className="eyebrow">New reporting and updates</span>
-                  <h2 id="latest-heading">Latest news</h2>
+                  <span className="eyebrow">{t('New reporting and updates')}</span>
+                  <h2 id="latest-heading">{t('Latest news')}</h2>
                 </div>
                 <Link className="text-link section-more" to="/news/">
-                  All news <span aria-hidden="true">→</span>
+                  {t('All news')} <span aria-hidden="true">→</span>
                 </Link>
               </div>
               {latest.length > 0 ? (
@@ -146,11 +146,11 @@ export default function HomePage() {
                   ))}
                 </div>
               ) : (
-                <p className="single-story-note">The published stories above are the latest from the newsroom.</p>
+                <p className="single-story-note">{t('The published stories above are the latest from the newsroom.')}</p>
               )}
               {result?.pagination?.total > articles.length && (
                 <div className="center-action">
-                  <Link className="button button--outline" to="/news/">Browse all stories</Link>
+                  <Link className="button button--outline" to="/news/">{t('Browse all stories')}</Link>
                 </div>
               )}
             </RevealSection>
@@ -159,8 +159,8 @@ export default function HomePage() {
               <RevealSection className="trending-section" aria-labelledby="trending-heading">
                 <div className="section-heading section-heading--row">
                   <div>
-                    <span className="eyebrow">Featured picks from the newsroom</span>
-                    <h2 id="trending-heading">Featured stories</h2>
+                    <span className="eyebrow">{t('Featured picks from the newsroom')}</span>
+                    <h2 id="trending-heading">{t('Featured stories')}</h2>
                   </div>
                 </div>
                 <div className="trending-list">
@@ -174,7 +174,7 @@ export default function HomePage() {
             {categorySections.length > 0 && (
               <RevealSection
                 className={`category-sections${categorySections.length === 1 ? ' category-sections--single' : ''}`}
-                aria-label="Latest by category"
+                aria-label={t('Latest by category')}
               >
                 {categorySections.map((category, index) => (
                   <section
@@ -184,11 +184,11 @@ export default function HomePage() {
                   >
                     <div className="section-heading section-heading--row">
                       <div>
-                        <span className="eyebrow">From the ecosystem</span>
-                        <h2 id={`category-${category.slug}`}>{category.name}</h2>
+                        <span className="eyebrow">{t('From the ecosystem')}</span>
+                        <h2 id={`category-${category.slug}`}>{t(category.name)}</h2>
                       </div>
                       <Link className="text-link" to={`/news/?category=${category.slug}`}>
-                        More {category.name} <span aria-hidden="true">→</span>
+                        {t('More')} {t(category.name)} <span aria-hidden="true">→</span>
                       </Link>
                     </div>
                     <div className={`story-grid category-story-grid${category.articles.length === 1 ? ' category-story-grid--single' : category.articles.length === 2 ? ' category-story-grid--double' : ''}`}>
@@ -212,14 +212,195 @@ export default function HomePage() {
   );
 }
 
+async function getPublishedArticles(signal) {
+  const firstPage = await getNews({ page: 1, limit: 50, signal });
+  const totalPages = firstPage.pagination?.totalPages ?? 1;
+  const remainingPages = await Promise.all(
+    Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) =>
+      getNews({ page: index + 2, limit: 50, signal })
+    )
+  );
+  return {
+    ...firstPage,
+    data: [firstPage, ...remainingPages].flatMap((page) => page.data)
+  };
+}
+
+function MoreHeadlines({ articles }) {
+  const { translate: t } = usePublicPreferences();
+  const panelRef = useRef(null);
+  const listRef = useRef(null);
+  const [looping, setLooping] = useState(false);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return undefined;
+
+    const motionPreference = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    const measure = () => {
+      const firstSequence = list.firstElementChild;
+      setLooping(Boolean(
+        articles.length &&
+        !motionPreference?.matches &&
+        firstSequence &&
+        firstSequence.offsetHeight > list.clientHeight
+      ));
+    };
+
+    measure();
+    motionPreference?.addEventListener?.('change', measure);
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => {
+        window.removeEventListener('resize', measure);
+        motionPreference?.removeEventListener?.('change', measure);
+      };
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(list);
+    if (list.firstElementChild) observer.observe(list.firstElementChild);
+    return () => {
+      observer.disconnect();
+      motionPreference?.removeEventListener?.('change', measure);
+    };
+  }, [articles]);
+
+  useEffect(() => {
+    const panel = panelRef.current;
+    const list = listRef.current;
+    if (!panel || !list || !looping) return undefined;
+
+    let frameId = 0;
+    let resumeTimer = 0;
+    let lastTimestamp = 0;
+    let hovered = false;
+    let focused = false;
+    let interacting = false;
+
+    const resumeAfterInteraction = () => {
+      window.clearTimeout(resumeTimer);
+      resumeTimer = window.setTimeout(() => {
+        interacting = false;
+      }, 900);
+    };
+    const beginInteraction = () => {
+      interacting = true;
+      window.clearTimeout(resumeTimer);
+    };
+    const onMouseEnter = () => { hovered = true; };
+    const onMouseLeave = () => { hovered = false; };
+    const onFocusIn = () => { focused = true; };
+    const onFocusOut = (event) => {
+      if (!panel.contains(event.relatedTarget)) focused = false;
+    };
+    const onPointerDown = beginInteraction;
+    const onPointerUp = resumeAfterInteraction;
+    const onTouchEnd = resumeAfterInteraction;
+    const onWheel = () => {
+      beginInteraction();
+      resumeAfterInteraction();
+    };
+    const onKeyDown = (event) => {
+      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) {
+        beginInteraction();
+        resumeAfterInteraction();
+      }
+    };
+
+    panel.addEventListener('mouseenter', onMouseEnter);
+    panel.addEventListener('mouseleave', onMouseLeave);
+    panel.addEventListener('focusin', onFocusIn);
+    panel.addEventListener('focusout', onFocusOut);
+    list.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointerup', onPointerUp, { passive: true });
+    list.addEventListener('touchstart', beginInteraction, { passive: true });
+    list.addEventListener('touchend', onTouchEnd, { passive: true });
+    list.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    list.addEventListener('wheel', onWheel, { passive: true });
+    list.addEventListener('keydown', onKeyDown);
+
+    const animate = (timestamp) => {
+      const delta = lastTimestamp ? Math.min(timestamp - lastTimestamp, 50) : 0;
+      lastTimestamp = timestamp;
+
+      if (!hovered && !focused && !interacting) {
+        const firstSequence = list.firstElementChild;
+        const loopHeight = firstSequence?.offsetHeight ?? 0;
+        if (loopHeight > list.clientHeight) {
+          list.scrollTop += delta * 0.016;
+          if (list.scrollTop >= loopHeight) list.scrollTop -= loopHeight;
+        }
+      } else {
+        lastTimestamp = 0;
+      }
+      frameId = window.requestAnimationFrame(animate);
+    };
+    frameId = window.requestAnimationFrame(animate);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(resumeTimer);
+      panel.removeEventListener('mouseenter', onMouseEnter);
+      panel.removeEventListener('mouseleave', onMouseLeave);
+      panel.removeEventListener('focusin', onFocusIn);
+      panel.removeEventListener('focusout', onFocusOut);
+      list.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      list.removeEventListener('touchstart', beginInteraction);
+      list.removeEventListener('touchend', onTouchEnd);
+      list.removeEventListener('touchcancel', onTouchEnd);
+      list.removeEventListener('wheel', onWheel);
+      list.removeEventListener('keydown', onKeyDown);
+    };
+  }, [looping]);
+
+  return (
+    <aside className="lead-support" ref={panelRef} aria-labelledby="lead-support-heading">
+      <div className="section-heading section-heading--row lead-support-heading">
+        <div>
+          <span className="eyebrow">{t('The newsroom')}</span>
+          <h2 id="lead-support-heading">{t('More headlines')}</h2>
+        </div>
+        <Link className="text-link" to="/news/" aria-label={t('Browse all latest news')}>{t('All news')} →</Link>
+      </div>
+      {articles.length > 0 ? (
+        <div
+          className="lead-support-list"
+          ref={listRef}
+          role="region"
+          aria-label={t('More headlines list')}
+          tabIndex={0}
+        >
+          <div className="lead-support-sequence">
+            {articles.map((article) => (
+              <SupportingStory article={article} key={article.id} />
+            ))}
+          </div>
+          {looping && (
+            <div className="lead-support-sequence" aria-hidden="true" inert>
+              {articles.map((article) => (
+                <SupportingStory article={article} key={`loop-${article.id}`} />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="single-story-note">{t('More reporting from the ecosystem will appear here as it is published.')}</p>
+      )}
+    </aside>
+  );
+}
+
 function SupportingStory({ article, index }) {
+  const { translate: t } = usePublicPreferences();
   return (
     <article className={`supporting-story${index ? ' supporting-story--numbered' : ''}`}>
       {index && <span className="supporting-story-number" aria-hidden="true">{String(index).padStart(2, '0')}</span>}
       <Link
         className="supporting-story-image"
         to={`/news/${encodeURIComponent(article.slug)}`}
-        aria-label={`Read story: ${article.title}`}
+        aria-label={`${t('Read story')}: ${article.title}`}
       >
         <StoryImage src={article.cover_image_url} alt="" articleSlug={article.slug} />
       </Link>
@@ -232,8 +413,9 @@ function SupportingStory({ article, index }) {
 }
 
 function HomeLoading() {
+  const { translate: t } = usePublicPreferences();
   return (
-    <div className="home-loading" aria-label="Loading news" aria-busy="true">
+    <div className="home-loading" aria-label={t('Loading news')} aria-busy="true">
       <div className="home-loading-lead skeleton" />
       <div className="home-loading-support">
         <div className="skeleton skeleton-line skeleton-medium" />

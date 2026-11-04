@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
+import { PERMISSION_ACTIONS, PERMISSION_MODULES } from '../src/permissions/registry.js';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_SECRET = 'test-session-secret-that-is-long-enough';
@@ -20,12 +21,20 @@ let adminHash;
 const uploadedImageBufferSizes = [];
 let uploadedBuffer;
 let imageUploadFailure = false;
+let mediaAssets = [];
 
 const categories = [
   { id: 1, name: 'Startups', slug: 'startups', description: null },
   { id: 2, name: 'Funding', slug: 'funding', description: null }
 ];
-const admin = { id: 1, name: 'Test Admin', email: 'admin@example.com' };
+const admin = {
+  id: 1,
+  name: 'Test Admin',
+  email: 'admin@example.com',
+  role: 'Admin',
+  is_active: 1,
+  auth_version: 0
+};
 
 function filterArticles(sql, values) {
   let params = [...values];
@@ -61,8 +70,63 @@ function createFakeDatabase() {
         if (!databaseAvailable) throw new Error('Database connection failed.');
         return [[{ ok: 1 }]];
       }
+      if (sql.startsWith('INSERT INTO media_assets')) {
+        const [publicId, secureUrl, resourceType, format, width, height, bytes, originalFilename] = values;
+        if (!mediaAssets.some((asset) => asset.cloudinary_public_id === publicId)) {
+          mediaAssets.push({
+            id: mediaAssets.length + 1,
+            cloudinary_public_id: publicId,
+            secure_url: secureUrl,
+            resource_type: resourceType,
+            format,
+            width,
+            height,
+            bytes,
+            original_filename: originalFilename,
+            created_at: new Date()
+          });
+        }
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.includes('FROM media_assets WHERE cloudinary_public_id = ?')) {
+        return [mediaAssets.filter((asset) => asset.cloudinary_public_id === values[0])];
+      }
       if (sql.includes('FROM admins WHERE email = ?')) {
         return [[admin.email === values[0] ? { ...admin, password_hash: adminHash } : undefined].filter(Boolean)];
+      }
+      if (sql.includes('FROM admins WHERE id = ?')) {
+        return [[admin.id === Number(values[0]) ? { ...admin } : undefined].filter(Boolean)];
+      }
+      if (sql.startsWith('SELECT modules.module_id')) {
+        const roleKey = values[0];
+        const accountId = Number(values[2]);
+        const protectedModules = new Set([
+          'access-control', 'user-management', 'role-builder', 'session-management',
+          'security-events', 'audit-logs', 'branding-theme-editor', 'menu-management',
+          'footer-management', 'seo-management', 'system-configuration', 'backup-restore',
+          'api-key-configuration', 'smtp-configuration'
+        ]);
+        return [[...PERMISSION_MODULES.flatMap((module) => PERMISSION_ACTIONS.map((actionId) => {
+          const isSuperAdmin = roleKey === 'super-admin';
+          const isAdminEditorialGrant = module.id === 'news-articles'
+            && ['view', 'create', 'edit', 'publish', 'delete', 'manage'].includes(actionId);
+          const isOverviewView = module.id === 'overview' && actionId === 'view';
+          const maxAllowed = isSuperAdmin
+            || (!protectedModules.has(module.id) && actionId !== 'configure');
+          return {
+            module_id: module.id,
+            label: module.label,
+            description: `${module.label} module`,
+            navigation_group: module.group,
+            is_available: module.available ? 1 : 0,
+            is_active: module.available ? 1 : 0,
+            action_id: actionId,
+            max_allowed: maxAllowed ? 1 : 0,
+            is_allowed: isSuperAdmin || isAdminEditorialGrant || isOverviewView ? 1 : 0,
+            override_allowed: null,
+            admin_id: accountId
+          };
+        }))]];
       }
       if (sql.startsWith('SELECT id, name, slug, description FROM categories')) {
         return [[...categories]];
@@ -165,6 +229,7 @@ function createFakeDatabase() {
 before(async () => {
   adminHash = await bcrypt.hash('correct-test-password', 4);
   articles = [];
+  mediaAssets = [];
   const [{ createApp }, { default: session }, { HttpError }] = await Promise.all([
     import('../src/app.js'),
     import('express-session'),
@@ -212,6 +277,28 @@ describe('admin authentication and article API', () => {
     assert.equal(typeof missing.body.error.message, 'string');
   });
 
+  it('requires an authenticated session and content-specific permissions for each new admin module', async () => {
+    const paths = [
+      '/api/admin/media',
+      '/api/admin/web-stories',
+      '/api/admin/hero-slides',
+      '/api/admin/videos'
+    ];
+    for (const path of paths) {
+      assert.equal((await request(app).get(path)).status, 401, `${path} must require authentication`);
+    }
+
+    const agent = request.agent(app);
+    const login = await agent.post('/api/auth/login').send({
+      email: admin.email,
+      password: 'correct-test-password'
+    });
+    assert.equal(login.status, 200);
+    for (const path of paths) {
+      assert.equal((await agent.get(path)).status, 403, `${path} must enforce the effective module permission`);
+    }
+  });
+
   it('validates login fields and does not create a session on failure', async () => {
     const invalid = await request(app).post('/api/auth/login').send({ email: 'bad', password: '' });
     assert.equal(invalid.status, 400);
@@ -237,6 +324,7 @@ describe('admin authentication and article API', () => {
       .post('/api/auth/login')
       .send({ email: admin.email, password: 'correct-test-password' });
     assert.equal(login.status, 200);
+    assert.equal(login.body.data.admin.role, 'Admin');
     assert.match(login.headers['set-cookie'][0], /HttpOnly/i);
     assert.match(login.headers['set-cookie'][0], /SameSite=Strict/i);
     assert.equal(Object.hasOwn(login.body.data.admin, 'password_hash'), false);
@@ -354,8 +442,61 @@ describe('admin authentication and article API', () => {
     const agent = request.agent(app);
     await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
     assert.equal((await agent.get('/api/auth/me')).body.data.authenticated, true);
+    assert.equal((await agent.get('/api/auth/me')).body.data.admin.role, 'Admin');
     assert.equal((await agent.post('/api/auth/logout')).status, 200);
     assert.equal((await agent.get('/api/auth/me')).body.data.authenticated, false);
+  });
+
+  it('rejects stale-role sessions and permits the current Super Admin session to manage articles', async () => {
+    const agent = request.agent(app);
+    await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
+
+    admin.role = 'Super Admin';
+    admin.auth_version += 1;
+    const staleRequest = await agent.get('/api/admin/articles');
+    assert.equal(staleRequest.status, 401);
+    assert.equal((await agent.post('/api/auth/logout')).status, 200);
+
+    const login = await agent.post('/api/auth/login').send({
+      email: admin.email,
+      password: 'correct-test-password'
+    });
+    assert.equal(login.status, 200);
+    assert.equal(login.body.data.admin.role, 'Super Admin');
+    const me = await agent.get('/api/auth/me');
+    assert.equal(me.body.data.authenticated, true);
+    assert.equal(me.body.data.admin.role, 'Super Admin');
+
+    const editorialAccess = await agent.get('/api/admin/articles');
+    assert.equal(editorialAccess.status, 200);
+    const created = await agent.post('/api/admin/articles').send({
+      title: 'Super Admin story',
+      slug: 'super-admin-story',
+      summary: 'Created by the Super Admin',
+      content: 'Editorial access remains available.',
+      category_id: 1,
+      author_name: 'StartupTN',
+      status: 'draft'
+    });
+    assert.equal(created.status, 201);
+    const published = await agent.patch('/api/admin/articles').send({
+      id: created.body.data.id,
+      status: 'published'
+    });
+    assert.equal(published.status, 200);
+    assert.equal(published.body.data.status, 'published');
+    assert.equal((await agent.delete('/api/admin/articles').send({ id: created.body.data.id })).status, 200);
+
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/r8cAAAAASUVORK5CYII=',
+      'base64'
+    );
+    const upload = await agent
+      .post('/api/admin/uploads')
+      .attach('image', png, { filename: 'super-admin.png', contentType: 'image/png' });
+    assert.equal(upload.status, 201);
+    admin.role = 'Admin';
+    admin.auth_version += 1;
   });
 
   it('persists and expires sessions through the MySQL session store contract', async () => {

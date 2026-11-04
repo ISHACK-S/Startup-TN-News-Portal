@@ -62,7 +62,12 @@ export async function uploadImageToCloudinary(buffer, detectedType) {
 
     return {
       url: result.secure_url,
-      provider_id: result.public_id
+      provider_id: result.public_id,
+      resource_type: result.resource_type ?? 'image',
+      format: result.format ?? detectedType.ext,
+      width: Number.isSafeInteger(result.width) ? result.width : null,
+      height: Number.isSafeInteger(result.height) ? result.height : null,
+      bytes: Number.isSafeInteger(result.bytes) ? result.bytes : null
     };
   } catch (error) {
     if (error instanceof HttpError) {

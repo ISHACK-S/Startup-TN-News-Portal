@@ -14,13 +14,20 @@ export const loginController = asyncHandler(async (request, response, next) => {
     request.session.adminId = admin.id;
     request.session.adminName = admin.name;
     request.session.adminEmail = admin.email;
+    request.session.authVersion = admin.authVersion;
     request.session.save((saveError) => {
       if (saveError) {
         next(saveError);
         return;
       }
 
-      response.status(200).json({ data: { admin } });
+      const publicAdmin = {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role
+      };
+      response.status(200).json({ data: { admin: publicAdmin } });
     });
   });
 });
@@ -46,7 +53,7 @@ export const logoutController = asyncHandler(async (request, response, next) => 
 });
 
 export const meController = asyncHandler(async (request, response) => {
-  if (!request.session?.adminId) {
+  if (!request.admin) {
     response.status(200).json({ data: { authenticated: false, admin: null } });
     return;
   }
@@ -55,9 +62,10 @@ export const meController = asyncHandler(async (request, response) => {
     data: {
       authenticated: true,
       admin: {
-        id: request.session.adminId,
-        name: request.session.adminName,
-        email: request.session.adminEmail
+        id: request.admin.id,
+        name: request.admin.name,
+        email: request.admin.email,
+        role: request.admin.role
       }
     }
   });

@@ -1,6 +1,6 @@
-import bcrypt from 'bcrypt';
 import { createInterface } from 'node:readline/promises';
 import { pool } from '../src/database/pool.js';
+import { hashAdminPassword } from '../src/services/admin-password.service.js';
 import { CredentialUpdateError, parseCredentialUpdate, updateAdminCredentials } from './admin-credentials.js';
 
 async function promptText(label) {
@@ -70,7 +70,7 @@ async function main() {
       newPassword: await promptHidden('New admin password'),
       passwordConfirmation: await promptHidden('Confirm new admin password')
     });
-    const passwordHash = await bcrypt.hash(credentials.newPassword, 12);
+    const passwordHash = await hashAdminPassword(credentials.newPassword);
 
     connection = await pool.getConnection();
     const result = await updateAdminCredentials(connection, {

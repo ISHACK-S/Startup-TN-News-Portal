@@ -65,19 +65,22 @@ function installApiMock(newsArticles = articles) {
       let filtered = [...newsArticles];
       const q = url.searchParams.get('q')?.toLowerCase();
       const category = url.searchParams.get('category');
+      const page = Number(url.searchParams.get('page') ?? 1);
+      const limit = Number(url.searchParams.get('limit') ?? 9);
       if (q) {
         filtered = filtered.filter((article) =>
           `${article.title} ${article.summary}`.toLowerCase().includes(q)
         );
       }
       if (category) filtered = filtered.filter((article) => article.category_slug === category);
+      const total = filtered.length;
       return jsonResponse({
-        data: filtered,
+        data: filtered.slice((page - 1) * limit, page * limit),
         pagination: {
-          page: Number(url.searchParams.get('page') ?? 1),
-          limit: 9,
-          total: filtered.length,
-          totalPages: q ? 1 : 2
+          page,
+          limit,
+          total,
+          totalPages: q ? Math.ceil(total / limit) : Math.max(total ? 2 : 0, Math.ceil(total / limit))
         }
       });
     }
@@ -93,7 +96,7 @@ afterEach(() => {
 });
 
 describe('public news experience', () => {
-  it('builds the homepage lead, recent-headline strip, and category sections from API stories', async () => {
+  it('builds the homepage lead, ticker, and category sections from API stories', async () => {
     installApiMock();
     render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
 
@@ -103,6 +106,9 @@ describe('public news experience', () => {
       link.getAttribute('href') === `/news/${articles[1].slug}`
     )).toBe(true);
     expect(screen.getByRole('heading', { name: 'Latest news' })).toBeInTheDocument();
+    expect(document.querySelector('.featured-copy p')).toBeNull();
+    expect(document.querySelector('.home-ticker-band')).toBeInTheDocument();
+    expect(document.querySelector('.edition-strip')).not.toBeInTheDocument();
     const latestSection = document.querySelector('.latest-section');
     expect(latestSection).not.toHaveClass('latest-section--empty');
     expect(within(latestSection).getByRole('link', { name: articles[1].title })).toHaveAttribute(
@@ -113,6 +119,51 @@ describe('public news experience', () => {
     expect(screen.getByRole('heading', { name: 'Startups' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Funding' })).toBeInTheDocument();
     expect(document.querySelectorAll('.category-story-grid--single')).toHaveLength(2);
+  });
+
+  it('shows the ten newest published stories in the More Headlines panel across API pages', async () => {
+    const recentStories = Array.from({ length: 12 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 0, index + 2)).toISOString();
+      return {
+        ...articles[0],
+        id: 100 + index,
+        title: `Recent story ${String(index + 1).padStart(2, '0')}`,
+        slug: `recent-story-${index + 1}`,
+        is_featured: false,
+        published_at: date,
+        created_at: date
+      };
+    });
+    const pinnedFeaturedStories = Array.from({ length: 51 }, (_, index) => ({
+      ...articles[0],
+      id: 200 + index,
+      title: `Older featured story ${index + 1}`,
+      slug: `older-featured-story-${index + 1}`,
+      is_featured: true,
+      published_at: new Date(Date.UTC(2025, 0, index + 1)).toISOString()
+    }));
+    const fetchMock = installApiMock([...pinnedFeaturedStories, ...recentStories.slice().reverse()]);
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+
+    const headlineList = await screen.findByRole('heading', { name: 'More headlines' });
+    const list = headlineList.closest('.lead-support').querySelector('.lead-support-list');
+    const titles = [...list.querySelectorAll('.supporting-story-copy h3 a')].map((link) => link.textContent);
+
+    expect(titles).toEqual(
+      Array.from({ length: 10 }, (_, index) => `Recent story ${String(12 - index).padStart(2, '0')}`)
+    );
+    expect(list.querySelectorAll('.supporting-story')).toHaveLength(10);
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('page=2'), expect.any(Object));
+  });
+
+  it('keeps the latest ticker and More Headlines empty state when no stories are published', async () => {
+    installApiMock([]);
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+
+    expect(await screen.findByLabelText('No published stories')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Recent headlines' })).toBeInTheDocument();
+    expect(document.querySelector('.edition-strip')).not.toBeInTheDocument();
+    expect(document.querySelector('.lead-support')).not.toBeInTheDocument();
   });
 
   it('balances primary and secondary three-story category sections', async () => {

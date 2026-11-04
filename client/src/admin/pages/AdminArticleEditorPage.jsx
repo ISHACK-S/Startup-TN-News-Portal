@@ -7,6 +7,8 @@ import ArticleContent from '../../components/ArticleContent.jsx';
 import StoryImage from '../../components/StoryImage.jsx';
 import { createInlineImageMarkup, isAllowedInlineImageUrl } from '../../utils/article-content.js';
 import { AdminError, AdminLoading } from '../components/AdminStates.jsx';
+import MediaLibraryPicker from '../components/MediaLibraryPicker.jsx';
+import { useAdminPermissions } from '../AdminPermissionContext.jsx';
 import { getCategories } from '../../api/news.js';
 
 const EMPTY_ARTICLE = {
@@ -58,6 +60,7 @@ export default function AdminArticleEditorPage() {
   const [inlineImageProgress, setInlineImageProgress] = useState(0);
   const [inlineImageError, setInlineImageError] = useState('');
   const [inlineImageMessage, setInlineImageMessage] = useState('');
+  const [mediaPickerTarget, setMediaPickerTarget] = useState('');
   const [attempt, setAttempt] = useState(0);
   const formRef = useRef(null);
   const contentEditorRef = useRef(null);
@@ -66,6 +69,7 @@ export default function AdminArticleEditorPage() {
   const pendingContentCursorRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const { hasPermission } = useAdminPermissions();
 
   useEffect(() => {
     if (!localPreview) return undefined;
@@ -184,6 +188,29 @@ export default function AdminArticleEditorPage() {
     };
   }
 
+  function insertInlineImageUrl(url) {
+    if (!isAllowedInlineImageUrl(url)) {
+      setInlineImageError('The selected asset is not a valid HTTPS Cloudinary image URL.');
+      return;
+    }
+    const imageMarkup = createInlineImageMarkup(url);
+    setArticle((current) => {
+      const selection = contentSelectionRef.current;
+      const selectionRetained = selection?.content === current.content;
+      const start = selectionRetained ? Math.min(selection.start, current.content.length) : current.content.length;
+      const end = selectionRetained ? Math.min(selection.end, current.content.length) : current.content.length;
+      const before = current.content.slice(0, start);
+      const after = current.content.slice(end);
+      const beforeSeparator = !before || before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+      const afterSeparator = !after || after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+      const inserted = `${before}${beforeSeparator}${imageMarkup}${afterSeparator}${after}`;
+      pendingContentCursorRef.current = before.length + beforeSeparator.length + imageMarkup.length;
+      return { ...current, content: inserted };
+    });
+    setInlineImageError('');
+    setInlineImageMessage('Image inserted into the story.');
+  }
+
   async function handleInlineImageChange(event) {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -208,30 +235,8 @@ export default function AdminArticleEditorPage() {
         throw new Error('The upload did not return a valid HTTPS Cloudinary image URL.');
       }
 
-      const imageMarkup = createInlineImageMarkup(uploaded.url);
-      setArticle((current) => {
-        const selection = contentSelectionRef.current;
-        const selectionRetained = selection?.content === current.content;
-        const start = selectionRetained
-          ? Math.min(selection.start, current.content.length)
-          : current.content.length;
-        const end = selectionRetained
-          ? Math.min(selection.end, current.content.length)
-          : current.content.length;
-        const before = current.content.slice(0, start);
-        const after = current.content.slice(end);
-        const beforeSeparator = !before || before.endsWith('\n\n')
-          ? ''
-          : before.endsWith('\n') ? '\n' : '\n\n';
-        const afterSeparator = !after || after.startsWith('\n\n')
-          ? ''
-          : after.startsWith('\n') ? '\n' : '\n\n';
-        const inserted = `${before}${beforeSeparator}${imageMarkup}${afterSeparator}${after}`;
-        pendingContentCursorRef.current = before.length + beforeSeparator.length + imageMarkup.length;
-        return { ...current, content: inserted };
-      });
+      insertInlineImageUrl(uploaded.url);
       setNotice('');
-      setInlineImageMessage('Image inserted into the story.');
     } catch (uploadFailure) {
       setInlineImageError(uploadFailure.message || 'The image could not be uploaded.');
     } finally {
@@ -387,6 +392,14 @@ export default function AdminArticleEditorPage() {
                 >
                   {inlineImageUploading ? 'Uploading image…' : 'Insert image into story'}
                 </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button--secondary"
+                  onMouseDown={() => rememberContentSelection(true)}
+                  onClick={() => setMediaPickerTarget('inline')}
+                >
+                  Choose from Media Library
+                </button>
                 {inlineImageUploading && (
                   <div className="admin-inline-image-progress" role="status" aria-live="polite">
                     <span>Uploading image · {inlineImageProgress}%</span>
@@ -508,6 +521,9 @@ export default function AdminArticleEditorPage() {
               <strong>{uploading ? 'Uploading image…' : 'Choose an image'}</strong>
               <small>JPEG, PNG or WebP · up to 5 MB</small>
             </label>
+            {hasPermission('media-library', 'view') && <button type="button" className="admin-button admin-button--secondary" onClick={() => setMediaPickerTarget('cover')}>
+              Choose existing media
+            </button>}
             {uploading && (
               <div className="admin-upload-progress" role="status" aria-live="polite">
                 <div><span>Uploading</span><span>{uploadProgress}%</span></div>
@@ -524,6 +540,21 @@ export default function AdminArticleEditorPage() {
         <ArticlePreview
           article={previewArticle}
           onClose={() => setPreviewOpen(false)}
+        />
+      )}
+      {mediaPickerTarget && (
+        <MediaLibraryPicker
+          onClose={() => setMediaPickerTarget('')}
+          onSelect={(asset) => {
+            if (mediaPickerTarget === 'cover') {
+              updateField('cover_image_url', asset.secure_url);
+              setLocalPreview('');
+              setUploadMessage('Image selected from the Media Library.');
+            } else {
+              insertInlineImageUrl(asset.secure_url);
+            }
+            setMediaPickerTarget('');
+          }}
         />
       )}
     </div>

@@ -6,8 +6,10 @@ import NewsSearch from '../components/NewsSearch.jsx';
 import RevealSection from '../components/RevealSection.jsx';
 import StoryCard from '../components/StoryCard.jsx';
 import { EmptyState, ErrorState, StoryGridSkeleton } from '../components/NewsStates.jsx';
+import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function NewsPage() {
+  const { translate: t } = usePublicPreferences();
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get('q') ?? '';
   const category = searchParams.get('category') ?? '';
@@ -62,9 +64,9 @@ export default function NewsPage() {
   return (
     <div className="site-shell news-page">
       <div className="page-intro">
-        <span className="eyebrow">The newsroom</span>
-        <h1>Latest <em>news.</em></h1>
-        <p>Reporting, perspectives and updates from across Tamil Nadu’s startup ecosystem.</p>
+        <span className="eyebrow">{t('The newsroom')}</span>
+        <h1>{t('Latest')} <em>{t('news.')}</em></h1>
+        <p>{t('Reporting, perspectives and updates from across Tamil Nadu’s startup ecosystem.')}</p>
       </div>
 
       <div className="news-tools">
@@ -77,14 +79,14 @@ export default function NewsPage() {
         />
         {categoryError && categories.length === 0 && (
           <p className="inline-error" role="status">
-            Categories are temporarily unavailable. You can still search all published stories.
+            {t('Categories are temporarily unavailable. You can still search all published stories.')}
           </p>
         )}
       </div>
 
       {query && (
         <p className="results-label">
-          Results for <strong>“{query}”</strong>{category && <> in <strong>{categories.find((item) => item.slug === category)?.name ?? category}</strong></>}
+          {t('Results for')} <strong>“{query}”</strong>{category && <> {t('in')} <strong>{t(categories.find((item) => item.slug === category)?.name ?? category)}</strong></>}
         </p>
       )}
 
@@ -104,23 +106,23 @@ export default function NewsPage() {
             {articles.map((article) => <StoryCard article={article} key={article.id} />)}
           </RevealSection>
           {pagination?.totalPages > 1 && (
-            <nav className="pagination" aria-label="News pages">
+            <nav className="pagination" aria-label={t('News pages')}>
               <button
                 className="button button--outline"
                 type="button"
                 disabled={page <= 1}
                 onClick={() => updateFilters({ page: String(page - 1) })}
               >
-                <span aria-hidden="true">←</span> Previous
+                <span aria-hidden="true">←</span> {t('Previous')}
               </button>
-              <span aria-live="polite">Page {page} of {pagination.totalPages}</span>
+              <span aria-live="polite">{t('Page')} {page} {t('of')} {pagination.totalPages}</span>
               <button
                 className="button button--outline"
                 type="button"
                 disabled={page >= pagination.totalPages}
                 onClick={() => updateFilters({ page: String(page + 1) })}
               >
-                Next <span aria-hidden="true">→</span>
+                {t('Next')} <span aria-hidden="true">→</span>
               </button>
             </nav>
           )}

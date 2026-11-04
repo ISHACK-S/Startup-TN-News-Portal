@@ -1,6 +1,9 @@
+import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
+
 export default function CategoryFilter({ categories, selected, onChange, disabled = false }) {
+  const { translate: t } = usePublicPreferences();
   return (
-    <div className="category-filter" aria-label="Filter by category">
+    <div className="category-filter" aria-label={t('Filter by category')}>
       <button
         className={`category-chip${selected === '' ? ' category-chip--active' : ''}`}
         type="button"
@@ -8,7 +11,7 @@ export default function CategoryFilter({ categories, selected, onChange, disable
         disabled={disabled}
         onClick={() => onChange('')}
       >
-        All stories
+        {t('All stories')}
       </button>
       {categories.map((category) => (
         <button
@@ -19,7 +22,7 @@ export default function CategoryFilter({ categories, selected, onChange, disable
           key={category.id ?? category.slug}
           onClick={() => onChange(category.slug)}
         >
-          {category.name}
+          {t(category.name)}
         </button>
       ))}
     </div>

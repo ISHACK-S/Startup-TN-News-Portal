@@ -1,15 +1,13 @@
-import bcrypt from 'bcrypt';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
 import { pool } from '../src/database/pool.js';
+import { hashAdminPassword } from '../src/services/admin-password.service.js';
+import { adminPasswordSchema } from '../src/validation/admin-password.js';
 
 const credentialsSchema = z.object({
   ADMIN_NAME: z.string().trim().min(1).max(150),
-  ADMIN_EMAIL: z.string().trim().email().max(254),
-  ADMIN_PASSWORD: z
-    .string()
-    .min(1)
-    .refine((value) => Buffer.byteLength(value, 'utf8') <= 72, 'Password must be at most 72 UTF-8 bytes.')
+  ADMIN_EMAIL: z.string().trim().email().max(254).transform((email) => email.toLowerCase()),
+  ADMIN_PASSWORD: adminPasswordSchema
 });
 
 async function promptText(label) {
@@ -125,12 +123,12 @@ async function provisionAdmin() {
       throw new Error('An admin already exists. This provisioning command can only be used once.');
     }
 
-    const passwordHash = await bcrypt.hash(credentials.ADMIN_PASSWORD, 12);
+    const passwordHash = await hashAdminPassword(credentials.ADMIN_PASSWORD);
     await connection.execute(
       'INSERT INTO admins (name, email, password_hash) VALUES (?, ?, ?)',
-      [credentials.ADMIN_NAME, credentials.ADMIN_EMAIL.toLowerCase(), passwordHash]
+      [credentials.ADMIN_NAME, credentials.ADMIN_EMAIL, passwordHash]
     );
-    console.info(`Admin account provisioned for ${credentials.ADMIN_EMAIL.toLowerCase()}.`);
+    console.info(`Admin account provisioned for ${credentials.ADMIN_EMAIL}.`);
   } finally {
     try {
       if (lockAcquired) {
