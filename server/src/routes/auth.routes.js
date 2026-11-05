@@ -1,9 +1,20 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { loginController, logoutController, meController } from '../controllers/auth.controller.js';
-import { optionalAdmin } from '../middleware/require-admin.js';
+import {
+  changeCurrentAdminPasswordController,
+  currentAdminProfileController,
+  loginController,
+  logoutController,
+  meController,
+  updateCurrentAdminProfileController
+} from '../controllers/auth.controller.js';
+import { optionalAdmin, requireAdmin } from '../middleware/require-admin.js';
 import { validate } from '../middleware/validate.js';
 import { loginSchema } from '../validation/auth.schemas.js';
+import {
+  adminPasswordChangeSchema,
+  adminProfileUpdateSchema
+} from '../validation/admin-profile.schemas.js';
 
 export const authRouter = Router();
 
@@ -18,3 +29,16 @@ const loginLimiter = rateLimit({
 authRouter.post('/login', loginLimiter, validate(loginSchema), loginController);
 authRouter.post('/logout', optionalAdmin, logoutController);
 authRouter.get('/me', optionalAdmin, meController);
+authRouter.get('/profile', requireAdmin, currentAdminProfileController);
+authRouter.patch(
+  '/profile',
+  requireAdmin,
+  validate(adminProfileUpdateSchema),
+  updateCurrentAdminProfileController
+);
+authRouter.patch(
+  '/profile/password',
+  requireAdmin,
+  validate(adminPasswordChangeSchema),
+  changeCurrentAdminPasswordController
+);

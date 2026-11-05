@@ -29,6 +29,10 @@ export const createAdminAccountController = asyncHandler(async (request, respons
     request.validated.body,
     request.admin.id
   ));
+  request.activityRecordId = result.id;
+  request.activityChanges = {
+    after: { role: result.role, isActive: result.isActive }
+  };
   response.status(201).json({ data: result });
 });
 
@@ -47,6 +51,17 @@ export const updateAdminAccountController = asyncHandler(async (request, respons
         actorAdminId: request.admin.id
       }
     );
+    request.activityChanged = result.changed;
+    if (result.changed) {
+      request.activityChanges = {
+        before: { role: result.previousRole, isActive: result.previousIsActive },
+        after: {
+          role: result.admin.role,
+          isActive: result.admin.isActive,
+          sessionsInvalidated: result.sessionsInvalidated
+        }
+      };
+    }
     response.status(200).json({
       data: result.admin,
       meta: {

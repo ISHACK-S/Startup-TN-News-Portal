@@ -1,0 +1,21 @@
+{
+  "language": "மொழி",
+  "Switch language to Tamil": "தமிழுக்கு மொழியை மாற்றவும்",
+  "Switch language to English": "ஆங்கிலத்திற்கு மொழியை மாற்றவும்",
+  "english": "English",
+  "tamil": "தமிழ்",
+  "loading": "ஏற்றப்படுகிறது…",
+  "retry": "மீண்டும் முயற்சிக்கவும்",
+  "save": "சேமிக்கவும்",
+  "cancel": "ரத்து செய்க",
+  "close": "மூடுக",
+  "search": "தேடுக",
+  "previous": "முந்தையது",
+  "next": "அடுத்தது",
+  "page": "பக்கம்",
+  "of": "/",
+  "success": "வெற்றி",
+  "failure": "தோல்வி",
+  "actions": "செயல்கள்",
+  "status": "நிலை"
+}

@@ -1,11 +1,28 @@
+import i18n from '../i18n/index.js';
+
 const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
+
+function localizeMessage(message) {
+  return i18n.t(message, { ns: 'errors', defaultValue: message });
+}
+
+function localizeDetails(details) {
+  if (Array.isArray(details)) {
+    return details.map((detail) => (
+      detail && typeof detail === 'object' && typeof detail.message === 'string'
+        ? { ...detail, message: localizeMessage(detail.message) }
+        : detail
+    ));
+  }
+  return details;
+}
 
 export class ApiError extends Error {
   constructor(message, status, details) {
-    super(message);
+    super(localizeMessage(message));
     this.name = 'ApiError';
     this.status = status;
-    this.details = details;
+    this.details = localizeDetails(details);
   }
 }
 
@@ -46,6 +63,37 @@ export async function apiRequest(path, { method = 'GET', body, signal } = {}) {
   }
 
   return payload;
+}
+
+export async function apiDownload(path, { signal } = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      credentials: 'include',
+      headers: { Accept: 'application/octet-stream' },
+      signal
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw new ApiError('Unable to connect to the StartupTN News service.', 0);
+  }
+  if (!response.ok) {
+    let payload;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new ApiError('The service returned an unexpected response.', response.status);
+    }
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('startuptn:session-expired'));
+    }
+    throw new ApiError(
+      payload?.error?.message || 'The export could not be generated.',
+      response.status,
+      payload?.error?.details
+    );
+  }
+  return response.blob();
 }
 
 function uploadImageTo(file, path, onProgress = () => {}) {

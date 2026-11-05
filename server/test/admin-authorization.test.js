@@ -30,9 +30,17 @@ function createAuthorizationApp(state) {
   const app = express();
   app.locals.database = {
     async execute(sql, values) {
-      assert.match(sql, /FROM admins WHERE id = \? LIMIT 1/);
-      assert.equal(values[0], state.admin.id);
-      return [[{ ...state.admin }]];
+      if (sql.includes('FROM admins WHERE id = ? LIMIT 1')) {
+        assert.equal(values[0], state.admin.id);
+        return [[{ ...state.admin }]];
+      }
+      if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+        return [[{
+          role_key: values[0] === 'Super Admin' ? 'super-admin' : 'admin',
+          is_active: 1
+        }]];
+      }
+      throw new Error(`Unexpected SQL in authorization middleware test: ${sql}`);
     }
   };
   app.use((req, res, next) => {
@@ -116,6 +124,12 @@ describe('admin role authorization', () => {
         calls.push([sql, values]);
         if (sql.includes('FROM admins ORDER BY id FOR UPDATE')) {
           return [[{ ...row }, { ...otherSuperAdmin }]];
+        }
+        if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+          return [[{
+            role_key: values[0] === 'Super Admin' ? 'super-admin' : 'admin',
+            is_active: 1
+          }]];
         }
         if (sql.startsWith('UPDATE admins SET role')) {
           const target = values[2] === row.id ? row : otherSuperAdmin;

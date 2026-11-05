@@ -1,22 +1,89 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Brand from './Brand.jsx';
 import RevealSection from './RevealSection.jsx';
+import LanguageSelector from './LanguageSelector.jsx';
 import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 const HEADER_COMPACT_AFTER = 104;
 const HEADER_EXPAND_BEFORE = 12;
 
-const categories = [
-  ['Startups', 'startups'],
-  ['Funding', 'funding'],
-  ['Events', 'events'],
-  ['Policy', 'policy'],
-  ['Innovation', 'innovation'],
-  ['Ecosystem', 'ecosystem']
-];
+function PublicMenuItem({ item, language, onNavigate, activeCategory, activePath }) {
+  const { t: tI18n } = useTranslation('public');
+  const [expanded, setExpanded] = useState(false);
+  const label = language === 'ta' ? item.labelTa : item.labelEn;
+  const children = item.children ?? [];
+  const isCategoryLink = item.destination.includes('category=');
+  const destinationPath = item.destination.split('?')[0].replace(/\/+$/, '') || '/';
+  const currentPath = activePath.replace(/\/+$/, '') || '/';
+  const active = isCategoryLink
+    ? activeCategory === new URLSearchParams(item.destination.split('?')[1]).get('category')
+    : destinationPath === '/news' && activeCategory
+      ? false
+      : destinationPath === '/'
+        ? currentPath === '/'
+        : currentPath === destinationPath || currentPath.startsWith(`${destinationPath}/`);
+  const className = `public-menu-link${active ? ' active' : ''}`;
+  const link = item.destinationType === 'external'
+    ? (
+      <a
+        className={className}
+        href={item.destination}
+        target={item.openInNewTab ? '_blank' : undefined}
+        rel={item.openInNewTab ? 'noopener noreferrer' : undefined}
+        onClick={onNavigate}
+      >
+        {label}
+      </a>
+    )
+    : (
+      <Link
+        className={className}
+        to={item.destination}
+        aria-current={active ? 'page' : undefined}
+        onClick={onNavigate}
+      >
+        {label}
+      </Link>
+    );
+
+  return (
+    <div className={`nav-menu-entry${children.length ? ' nav-menu-entry--has-children' : ''}`}>
+      <div className="nav-menu-primary">
+        {link}
+        {children.length > 0 && (
+          <button
+            type="button"
+            className="nav-submenu-toggle"
+            aria-label={`${expanded ? 'Hide' : 'Show'} ${label} submenu`}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            <span aria-hidden="true">{expanded ? '−' : '+'}</span>
+          </button>
+        )}
+      </div>
+      {children.length > 0 && (
+        <div className={`nav-submenu${expanded ? ' nav-submenu--open' : ''}`}>
+          {children.map((child) => (
+            <PublicMenuItem
+              key={child.id}
+              item={child}
+              language={language}
+              onNavigate={onNavigate}
+              activeCategory={activeCategory}
+              activePath={activePath}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SiteLayout() {
+  const { t: tI18n } = useTranslation('public');
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [compact, setCompact] = useState(false);
@@ -28,10 +95,12 @@ export default function SiteLayout() {
     highContrast,
     language,
     changeFontSize,
-    setLanguage,
     toggleContrast,
-    translate: t
+    translate: t,
+    siteConfiguration,
+    configurationError
   } = usePublicPreferences();
+  const { menu, footer } = siteConfiguration;
 
   useEffect(() => {
     let frame = 0;
@@ -92,15 +161,14 @@ export default function SiteLayout() {
         {t('Skip to main content')}
       </a>
       <header className={`site-header${compact ? ' site-header--compact' : ''}`}>
+        {configurationError && <p className="public-config-warning" role="status">{configurationError}</p>}
         <div className="utility-bar">
           <div className="site-shell mx-auto utility-inner">
             <span className="utility-tagline">{t('Stories from the Tamil Nadu startup ecosystem')}</span>
             <AccessibilityToolbar
               fontIndex={fontIndex}
               highContrast={highContrast}
-              language={language}
               onFontSize={changeFontSize}
-              onLanguage={setLanguage}
               onContrast={toggleContrast}
               t={t}
             />
@@ -139,26 +207,15 @@ export default function SiteLayout() {
         </div>
         <nav id="primary-navigation" className={`primary-nav${menuOpen ? ' primary-nav--open' : ''}`} aria-label={t('Main navigation')}>
           <div className="site-shell mx-auto nav-inner">
-            <NavLink to="/" end onClick={() => setMenuOpen(false)}>{t('Home')}</NavLink>
-            <NavLink
-              to="/news/"
-              className={({ isActive }) => isActive && !activeCategory ? 'active' : undefined}
-              onClick={() => setMenuOpen(false)}
-            >
-              {t('Latest news')}
-            </NavLink>
-            <NavLink to="/stories" onClick={() => setMenuOpen(false)}>{t('Web Stories')}</NavLink>
-            <NavLink to="/videos" onClick={() => setMenuOpen(false)}>{t('Video & Media')}</NavLink>
-            {categories.map(([name, slug]) => (
-              <Link
-                key={slug}
-                to={`/news/?category=${slug}`}
-                className={activeCategory === slug ? 'active' : undefined}
-                aria-current={activeCategory === slug ? 'page' : undefined}
-                onClick={() => setMenuOpen(false)}
-              >
-                {t(name)}
-              </Link>
+            {menu.map((item) => (
+              <PublicMenuItem
+                key={item.id}
+                item={item}
+                language={language}
+                activeCategory={activeCategory}
+                activePath={location.pathname}
+                onNavigate={() => setMenuOpen(false)}
+              />
             ))}
             <span className="nav-note">{t('A closer look at what’s next')}</span>
           </div>
@@ -167,28 +224,59 @@ export default function SiteLayout() {
       <main id="main-content" tabIndex={-1}>
         <Outlet />
       </main>
-      <footer className="site-footer">
+      {footer.isVisible !== false && <footer className="site-footer">
         <RevealSection as="div" className="site-shell mx-auto footer-main">
           <div className="footer-publication">
             <Brand compact />
-            <p>{t('Independent stories and perspectives from across Tamil Nadu’s startup ecosystem.')}</p>
-            <span>{t('Independent editorial project · Not an official StartupTN publication')}</span>
+            {(language === 'ta' ? footer.descriptionTa : footer.descriptionEn) && (
+              <p>{language === 'ta' ? footer.descriptionTa : footer.descriptionEn}</p>
+            )}
+            {(footer.email || footer.phone || (language === 'ta' ? footer.addressTa : footer.addressEn)) && (
+              <address className="footer-contact">
+                {footer.email && <a href={`mailto:${footer.email}`}>{footer.email}</a>}
+                {footer.phone && <a href={`tel:${footer.phone.replace(/[^\d+]/g, '')}`}>{footer.phone}</a>}
+                {(language === 'ta' ? footer.addressTa : footer.addressEn) && (
+                  <span>{language === 'ta' ? footer.addressTa : footer.addressEn}</span>
+                )}
+              </address>
+            )}
+            {footer.socialLinks?.length > 0 && (
+              <nav className="footer-social-links" aria-label={tI18n("Social media", { defaultValue: "Social media" })}>
+                {footer.socialLinks.map((item) => (
+                  <a key={item.id} href={item.url} target="_blank" rel="noopener noreferrer">{item.label}</a>
+                ))}
+              </nav>
+            )}
           </div>
-          <div className="footer-links">
-            <strong>{t('Explore')}</strong>
-            <Link to="/news/">{t('Latest news')}</Link>
-            {categories.map(([name, slug]) => (
-              <Link key={slug} to={`/news/?category=${slug}`}>{t(name)}</Link>
-            ))}
-          </div>
+          {footer.groups.map((group) => (
+            <div className="footer-links" key={group.id}>
+              <strong>{language === 'ta' ? group.headingTa : group.headingEn}</strong>
+              {group.links.map((item) => (
+                item.url.startsWith('/')
+                  ? <Link key={item.id} to={item.url}>{language === 'ta' ? item.labelTa : item.labelEn}</Link>
+                  : (
+                    <a
+                      key={item.id}
+                      href={item.url}
+                      target={item.openInNewTab ? '_blank' : undefined}
+                      rel={item.openInNewTab ? 'noopener noreferrer' : undefined}
+                    >
+                      {language === 'ta' ? item.labelTa : item.labelEn}
+                    </a>
+                  )
+              ))}
+            </div>
+          ))}
         </RevealSection>
         <div className="footer-bottom">
           <div className="site-shell mx-auto">
-            <span>© {new Date().getFullYear()} StartupTN News</span>
-            <Link to="/">{t('Back to top')} <span aria-hidden="true">↑</span></Link>
+            <span>{tI18n("©", { defaultValue: "©" })} {footer.dynamicYear ? new Date().getFullYear() : ''}
+              {language === 'ta' ? footer.copyrightTa : footer.copyrightEn}
+            </span>
+            <Link to="/">{t('Back to top')} <span aria-hidden="true">{tI18n("↑", { defaultValue: "↑" })}</span></Link>
           </div>
         </div>
-      </footer>
+      </footer>}
     </>
   );
 }
@@ -196,12 +284,11 @@ export default function SiteLayout() {
 function AccessibilityToolbar({
   fontIndex,
   highContrast,
-  language,
   onFontSize,
-  onLanguage,
   onContrast,
   t
 }) {
+  const { t: tI18n } = useTranslation('public');
   return (
     <div className="accessibility-toolbar" role="group" aria-label={t('Accessibility controls')}>
       <button
@@ -211,9 +298,7 @@ function AccessibilityToolbar({
         title={t('Decrease text size')}
         disabled={fontIndex === 0}
         onClick={() => onFontSize(-1)}
-      >
-        A−
-      </button>
+      >{tI18n("A−", { defaultValue: "A−" })} </button>
       <button
         type="button"
         className="accessibility-font-button accessibility-font-reset"
@@ -221,9 +306,7 @@ function AccessibilityToolbar({
         title={t('Reset text size')}
         aria-pressed={fontIndex === 2}
         onClick={() => onFontSize(0)}
-      >
-        A
-      </button>
+      >{tI18n("A", { defaultValue: "A" })} </button>
       <button
         type="button"
         className="accessibility-font-button"
@@ -231,9 +314,7 @@ function AccessibilityToolbar({
         title={t('Increase text size')}
         disabled={fontIndex === 6}
         onClick={() => onFontSize(1)}
-      >
-        A+
-      </button>
+      >{tI18n("A+", { defaultValue: "A+" })} </button>
       <button
         type="button"
         className="accessibility-contrast-button"
@@ -244,22 +325,13 @@ function AccessibilityToolbar({
       >
         {t('Contrast')}
       </button>
-      <label className="sr-only" htmlFor="site-language">{t('Language')}</label>
-      <select
-        id="site-language"
-        className="accessibility-language"
-        aria-label={t('Language')}
-        value={language}
-        onChange={(event) => onLanguage(event.target.value)}
-      >
-        <option value="en">English</option>
-        <option value="ta">தமிழ்</option>
-      </select>
+      <LanguageSelector className="accessibility-language-button" />
     </div>
   );
 }
 
 function SearchIcon() {
+  const { t: tI18n } = useTranslation('public');
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
       <circle cx="10.8" cy="10.8" r="6.8" stroke="currentColor" strokeWidth="1.8" />
@@ -269,6 +341,7 @@ function SearchIcon() {
 }
 
 function MenuIcon({ open }) {
+  const { t: tI18n } = useTranslation('public');
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
       {open

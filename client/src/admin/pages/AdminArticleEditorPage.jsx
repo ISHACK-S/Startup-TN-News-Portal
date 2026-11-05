@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { createAdminArticle, getAdminArticle, updateAdminArticle } from '../../api/admin.js';
@@ -9,7 +10,7 @@ import { createInlineImageMarkup, isAllowedInlineImageUrl } from '../../utils/ar
 import { AdminError, AdminLoading } from '../components/AdminStates.jsx';
 import MediaLibraryPicker from '../components/MediaLibraryPicker.jsx';
 import { useAdminPermissions } from '../AdminPermissionContext.jsx';
-import { getCategories } from '../../api/news.js';
+import { getCategories, getPublicVideos } from '../../api/news.js';
 
 const EMPTY_ARTICLE = {
   title: '',
@@ -41,6 +42,7 @@ function formatValidationError(error) {
 }
 
 export default function AdminArticleEditorPage() {
+  const { t: tI18n } = useTranslation('admin');
   const { id } = useParams();
   const isEditing = Boolean(id);
   const [article, setArticle] = useState(EMPTY_ARTICLE);
@@ -61,6 +63,12 @@ export default function AdminArticleEditorPage() {
   const [inlineImageError, setInlineImageError] = useState('');
   const [inlineImageMessage, setInlineImageMessage] = useState('');
   const [mediaPickerTarget, setMediaPickerTarget] = useState('');
+  const [videoPickerOpen, setVideoPickerOpen] = useState(false);
+  const [videoSearch, setVideoSearch] = useState('');
+  const [publishedVideos, setPublishedVideos] = useState([]);
+  const [selectedVideoId, setSelectedVideoId] = useState('');
+  const [videoPickerLoading, setVideoPickerLoading] = useState(false);
+  const [videoPickerError, setVideoPickerError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const formRef = useRef(null);
   const contentEditorRef = useRef(null);
@@ -75,6 +83,27 @@ export default function AdminArticleEditorPage() {
     if (!localPreview) return undefined;
     return () => URL.revokeObjectURL(localPreview);
   }, [localPreview]);
+
+  useEffect(() => {
+    if (!videoPickerOpen) return undefined;
+    const controller = new AbortController();
+    setVideoPickerLoading(true);
+    setVideoPickerError('');
+    getPublicVideos({ page: 1, limit: 50, q: videoSearch, signal: controller.signal })
+      .then((result) => {
+        setPublishedVideos(result.data);
+        setSelectedVideoId((current) => result.data.some((video) => String(video.id) === current)
+          ? current
+          : '');
+      })
+      .catch((failure) => {
+        if (failure.name !== 'AbortError') setVideoPickerError(failure.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setVideoPickerLoading(false);
+      });
+    return () => controller.abort();
+  }, [videoPickerOpen, videoSearch]);
 
   useLayoutEffect(() => {
     const cursor = pendingContentCursorRef.current;
@@ -93,7 +122,7 @@ export default function AdminArticleEditorPage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    setError('');
+    setError("");
     setNotice(location.state?.notice ?? '');
 
     Promise.all([
@@ -144,7 +173,7 @@ export default function AdminArticleEditorPage() {
 
   function updateField(field, value) {
     setArticle((current) => ({ ...current, [field]: value }));
-    setNotice('');
+    setNotice("");
   }
 
   async function handleImageChange(event) {
@@ -211,6 +240,31 @@ export default function AdminArticleEditorPage() {
     setInlineImageMessage('Image inserted into the story.');
   }
 
+  function insertInlineVideo() {
+    if (!/^\d+$/.test(selectedVideoId)) {
+      setVideoPickerError('Choose a published video to insert.');
+      return;
+    }
+    const marker = `{{video:${selectedVideoId}}}`;
+    setArticle((current) => {
+      const selection = contentSelectionRef.current;
+      const selectionRetained = selection?.content === current.content;
+      const start = selectionRetained ? Math.min(selection.start, current.content.length) : current.content.length;
+      const end = selectionRetained ? Math.min(selection.end, current.content.length) : current.content.length;
+      const before = current.content.slice(0, start);
+      const after = current.content.slice(end);
+      const beforeSeparator = !before || before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n';
+      const afterSeparator = !after || after.startsWith('\n\n') ? '' : after.startsWith('\n') ? '\n' : '\n\n';
+      const inserted = `${before}${beforeSeparator}${marker}${afterSeparator}${after}`;
+      pendingContentCursorRef.current = before.length + beforeSeparator.length + marker.length;
+      return { ...current, content: inserted };
+    });
+    setVideoPickerError('');
+    setVideoPickerOpen(false);
+    setVideoSearch('');
+    setSelectedVideoId('');
+  }
+
   async function handleInlineImageChange(event) {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -236,7 +290,7 @@ export default function AdminArticleEditorPage() {
       }
 
       insertInlineImageUrl(uploaded.url);
-      setNotice('');
+      setNotice("");
     } catch (uploadFailure) {
       setInlineImageError(uploadFailure.message || 'The image could not be uploaded.');
     } finally {
@@ -253,8 +307,8 @@ export default function AdminArticleEditorPage() {
 
   async function saveArticle(status) {
     if (!formRef.current?.reportValidity()) return;
-    setError('');
-    setNotice('');
+    setError("");
+    setNotice("");
     setSaving(true);
     const payload = {
       title: article.title.trim(),
@@ -294,10 +348,10 @@ export default function AdminArticleEditorPage() {
     <div className="admin-page admin-editor-page">
       <div className="admin-page-heading admin-editor-heading">
         <div>
-          <Link className="admin-back-link" to="/admin/news">← Articles</Link>
+          <Link className="admin-back-link" to="/admin/news">{tI18n("← Articles", { defaultValue: "← Articles" })}</Link>
           <span className="admin-eyebrow">{isEditing ? 'Refine and publish' : 'Create a new story'}</span>
           <h1>{isEditing ? 'Edit article' : 'New article'}</h1>
-          <p>Clear reporting starts with a strong headline and reliable source.</p>
+          <p>{tI18n("Clear reporting starts with a strong headline and reliable source.", { defaultValue: "Clear reporting starts with a strong headline and reliable source." })}</p>
         </div>
         <div className="admin-editor-top-actions">
           <button
@@ -305,9 +359,7 @@ export default function AdminArticleEditorPage() {
             className="admin-button admin-button--secondary"
             onClick={() => setPreviewOpen(true)}
             disabled={!article.title.trim()}
-          >
-            Preview
-          </button>
+          >{tI18n("Preview", { defaultValue: "Preview" })} </button>
         </div>
       </div>
 
@@ -318,12 +370,12 @@ export default function AdminArticleEditorPage() {
         <div className="admin-editor-main">
           <section className="admin-panel admin-editor-fields">
             <label className="admin-field">
-              <span>Headline <b aria-hidden="true">*</b></span>
+              <span>{tI18n("Headline", { defaultValue: "Headline" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b></span>
               <input
                 type="text"
                 required
                 maxLength={255}
-                placeholder="Write a clear, specific headline"
+                placeholder={tI18n("Write a clear, specific headline", { defaultValue: "Write a clear, specific headline" })}
                 value={article.title}
                 onChange={(event) => {
                   const title = event.target.value;
@@ -334,13 +386,13 @@ export default function AdminArticleEditorPage() {
                   }));
                 }}
               />
-              <small>Keep it concise and focused on the news.</small>
+              <small>{tI18n("Keep it concise and focused on the news.", { defaultValue: "Keep it concise and focused on the news." })}</small>
             </label>
 
             <label className="admin-field">
-              <span>Article URL slug <b aria-hidden="true">*</b></span>
+              <span>{tI18n("Article URL slug", { defaultValue: "Article URL slug" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b></span>
               <div className="admin-slug-input">
-                <span>/news/</span>
+                <span>{tI18n("/news/", { defaultValue: "/news/" })}</span>
                 <input
                   type="text"
                   required
@@ -353,20 +405,20 @@ export default function AdminArticleEditorPage() {
                   }}
                 />
               </div>
-              <small>Lowercase letters, numbers and hyphens. Must be unique.</small>
+              <small>{tI18n("Lowercase letters, numbers and hyphens. Must be unique.", { defaultValue: "Lowercase letters, numbers and hyphens. Must be unique." })}</small>
             </label>
 
             <label className="admin-field">
-              <span>Summary <b aria-hidden="true">*</b></span>
+              <span>{tI18n("Summary", { defaultValue: "Summary" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b></span>
               <textarea
                 required
                 rows={3}
                 maxLength={10000}
-                placeholder="A short introduction for article cards and search results"
+                placeholder={tI18n("A short introduction for article cards and search results", { defaultValue: "A short introduction for article cards and search results" })}
                 value={article.summary}
                 onChange={(event) => updateField('summary', event.target.value)}
               />
-              <small>{article.summary.length} characters</small>
+              <small>{article.summary.length} {tI18n("characters", { defaultValue: "characters" })}</small>
             </label>
 
             <input
@@ -374,13 +426,12 @@ export default function AdminArticleEditorPage() {
               className="admin-inline-image-input"
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              aria-label="Choose image to insert into story"
+              aria-label={tI18n("Choose image to insert into story", { defaultValue: "Choose image to insert into story" })}
               disabled={inlineImageUploading}
               onChange={handleInlineImageChange}
             />
             <div className="admin-field">
-              <label htmlFor="admin-article-content">
-                Full article <b aria-hidden="true">*</b>
+              <label htmlFor="admin-article-content">{tI18n("Full article", { defaultValue: "Full article" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b>
               </label>
               <div className="admin-inline-image-actions">
                 <button
@@ -397,13 +448,38 @@ export default function AdminArticleEditorPage() {
                   className="admin-button admin-button--secondary"
                   onMouseDown={() => rememberContentSelection(true)}
                   onClick={() => setMediaPickerTarget('inline')}
+                >{tI18n("Choose from Media Library", { defaultValue: "Choose from Media Library" })} </button>
+                <button
+                  type="button"
+                  className="admin-button admin-button--secondary"
+                  onMouseDown={() => rememberContentSelection(true)}
+                  onClick={() => setVideoPickerOpen((open) => !open)}
                 >
-                  Choose from Media Library
+                  {videoPickerOpen ? 'Close video picker' : 'Insert published video'}
                 </button>
+                {videoPickerOpen && (
+                  <div className="admin-inline-video-picker">
+                    <label className="admin-field">
+                      <span>{tI18n("Search published videos", { defaultValue: "Search published videos" })}</span>
+                      <input type="search" value={videoSearch} onChange={(event) => setVideoSearch(event.target.value)} />
+                    </label>
+                    <label className="admin-field">
+                      <span>{tI18n("Choose a video", { defaultValue: "Choose a video" })}</span>
+                      <select value={selectedVideoId} onChange={(event) => setSelectedVideoId(event.target.value)} disabled={videoPickerLoading}>
+                        <option value="">{tI18n("Select a published video", { defaultValue: "Select a published video" })}</option>
+                        {publishedVideos.map((video) => <option value={video.id} key={video.id}>{video.title} {tI18n("·", { defaultValue: "·" })} {video.category}</option>)}
+                      </select>
+                    </label>
+                    {videoPickerLoading && <p role="status">{tI18n("Loading published videos…", { defaultValue: "Loading published videos…" })}</p>}
+                    {!videoPickerLoading && !videoPickerError && !publishedVideos.length && <p>{tI18n("No published videos found.", { defaultValue: "No published videos found." })}</p>}
+                    {videoPickerError && <p className="admin-form-error" role="alert">{videoPickerError}</p>}
+                    <button type="button" className="admin-button admin-button--primary" disabled={!selectedVideoId || videoPickerLoading} onClick={insertInlineVideo}>{tI18n("Insert video into story", { defaultValue: "Insert video into story" })}</button>
+                  </div>
+                )}
                 {inlineImageUploading && (
                   <div className="admin-inline-image-progress" role="status" aria-live="polite">
-                    <span>Uploading image · {inlineImageProgress}%</span>
-                    <progress max="100" value={inlineImageProgress}>{inlineImageProgress}%</progress>
+                    <span>{tI18n("Uploading image ·", { defaultValue: "Uploading image ·" })} {inlineImageProgress}{tI18n("%", { defaultValue: "%" })}</span>
+                    <progress max="100" value={inlineImageProgress}>{inlineImageProgress}{tI18n("%", { defaultValue: "%" })}</progress>
                   </div>
                 )}
                 {inlineImageMessage && <p className="admin-upload-success" role="status">{inlineImageMessage}</p>}
@@ -415,7 +491,7 @@ export default function AdminArticleEditorPage() {
                 className="admin-content-editor"
                 required
                 rows={17}
-                placeholder="Write the full story. Add context, quotes and verified details."
+                placeholder={tI18n("Write the full story. Add context, quotes and verified details.", { defaultValue: "Write the full story. Add context, quotes and verified details." })}
                 value={article.content}
                 onChange={(event) => {
                   rememberContentSelection();
@@ -426,7 +502,7 @@ export default function AdminArticleEditorPage() {
                 onKeyUp={rememberContentSelection}
                 onClick={rememberContentSelection}
               />
-              <small>Plain-text paragraphs and line breaks are preserved. Inserted images stay at their position in the story.</small>
+              <small>{tI18n("Plain-text paragraphs and line breaks are preserved. Inserted images stay at their position in the story.", { defaultValue: "Plain-text paragraphs and line breaks are preserved. Inserted images stay at their position in the story." })}</small>
             </div>
           </section>
         </div>
@@ -434,9 +510,9 @@ export default function AdminArticleEditorPage() {
         <aside className="admin-editor-sidebar">
           <section className="admin-panel admin-publish-panel">
             <div className="admin-panel-heading">
-              <div><span className="admin-eyebrow">Publication</span><h2>Ready to share?</h2></div>
+              <div><span className="admin-eyebrow">{tI18n("Publication", { defaultValue: "Publication" })}</span><h2>{tI18n("Ready to share?", { defaultValue: "Ready to share?" })}</h2></div>
             </div>
-            {isEditing && <p className="admin-current-status">Current status: <strong>{article.status === 'published' ? 'Published' : 'Draft'}</strong></p>}
+            {isEditing && <p className="admin-current-status">{tI18n("Current status:", { defaultValue: "Current status:" })} <strong>{article.status === 'published' ? 'Published' : 'Draft'}</strong></p>}
             <button
               type="button"
               className="admin-button admin-button--secondary admin-full-button"
@@ -453,42 +529,42 @@ export default function AdminArticleEditorPage() {
             >
               {saving ? 'Saving…' : article.status === 'published' ? 'Save & publish' : 'Publish article'}
             </button>
-            <p className="admin-publish-note">Publishing makes this article visible on the public news site.</p>
+            <p className="admin-publish-note">{tI18n("Publishing makes this article visible on the public news site.", { defaultValue: "Publishing makes this article visible on the public news site." })}</p>
           </section>
 
           <section className="admin-panel admin-side-fields">
-            <div className="admin-panel-heading"><div><span className="admin-eyebrow">Story details</span><h2>Metadata</h2></div></div>
+            <div className="admin-panel-heading"><div><span className="admin-eyebrow">{tI18n("Story details", { defaultValue: "Story details" })}</span><h2>{tI18n("Metadata", { defaultValue: "Metadata" })}</h2></div></div>
             <label className="admin-field">
-              <span>Category <b aria-hidden="true">*</b></span>
+              <span>{tI18n("Category", { defaultValue: "Category" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b></span>
               <select
                 required
                 value={article.category_id}
                 onChange={(event) => updateField('category_id', event.target.value)}
               >
-                <option value="" disabled>Select a category</option>
+                <option value="" disabled>{tI18n("Select a category", { defaultValue: "Select a category" })}</option>
                 {categories.map((category) => (
                   <option value={category.id} key={category.id}>{category.name}</option>
                 ))}
               </select>
             </label>
             <label className="admin-field">
-              <span>Author name <b aria-hidden="true">*</b></span>
+              <span>{tI18n("Author name", { defaultValue: "Author name" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b></span>
               <input
                 type="text"
                 required
                 maxLength={150}
                 value={article.author_name}
                 onChange={(event) => updateField('author_name', event.target.value)}
-                placeholder="Byline"
+                placeholder={tI18n("Byline", { defaultValue: "Byline" })}
               />
             </label>
             <label className="admin-field">
-              <span>Source URL</span>
+              <span>{tI18n("Source URL", { defaultValue: "Source URL" })}</span>
               <input
                 type="url"
                 value={article.source_url ?? ''}
                 onChange={(event) => updateField('source_url', event.target.value || null)}
-                placeholder="https://"
+                placeholder={tI18n("https://", { defaultValue: "https://" })}
               />
             </label>
             <label className="admin-featured-toggle">
@@ -497,37 +573,35 @@ export default function AdminArticleEditorPage() {
                 checked={article.is_featured}
                 onChange={(event) => updateField('is_featured', event.target.checked)}
               />
-              <span><strong>Feature this story</strong><small>Give it prominence on the front page.</small></span>
+              <span><strong>{tI18n("Feature this story", { defaultValue: "Feature this story" })}</strong><small>{tI18n("Give it prominence on the front page.", { defaultValue: "Give it prominence on the front page." })}</small></span>
             </label>
           </section>
 
           <section className="admin-panel admin-cover-panel">
-            <div className="admin-panel-heading"><div><span className="admin-eyebrow">Visual</span><h2>Cover image</h2></div></div>
+            <div className="admin-panel-heading"><div><span className="admin-eyebrow">{tI18n("Visual", { defaultValue: "Visual" })}</span><h2>{tI18n("Cover image", { defaultValue: "Cover image" })}</h2></div></div>
             {(localPreview || article.cover_image_url) && (
               <div className="admin-cover-preview">
-                <StoryImage src={localPreview || article.cover_image_url} alt="Cover image preview" />
-                <button type="button" className="admin-cover-remove" onClick={removeCoverImage}>Remove image</button>
+                <StoryImage src={localPreview || article.cover_image_url} alt={tI18n("Cover image preview", { defaultValue: "Cover image preview" })} />
+                <button type="button" className="admin-cover-remove" onClick={removeCoverImage}>{tI18n("Remove image", { defaultValue: "Remove image" })}</button>
               </div>
             )}
             <label className="admin-upload-zone">
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                aria-label="Choose cover image"
+                aria-label={tI18n("Choose cover image", { defaultValue: "Choose cover image" })}
                 disabled={uploading}
                 onChange={handleImageChange}
               />
-              <span className="admin-upload-icon" aria-hidden="true">＋</span>
+              <span className="admin-upload-icon" aria-hidden="true">{tI18n("＋", { defaultValue: "＋" })}</span>
               <strong>{uploading ? 'Uploading image…' : 'Choose an image'}</strong>
-              <small>JPEG, PNG or WebP · up to 5 MB</small>
+              <small>{tI18n("JPEG, PNG or WebP · up to 5 MB", { defaultValue: "JPEG, PNG or WebP · up to 5 MB" })}</small>
             </label>
-            {hasPermission('media-library', 'view') && <button type="button" className="admin-button admin-button--secondary" onClick={() => setMediaPickerTarget('cover')}>
-              Choose existing media
-            </button>}
+            {hasPermission('media-library', 'view') && <button type="button" className="admin-button admin-button--secondary" onClick={() => setMediaPickerTarget('cover')}>{tI18n("Choose existing media", { defaultValue: "Choose existing media" })} </button>}
             {uploading && (
               <div className="admin-upload-progress" role="status" aria-live="polite">
-                <div><span>Uploading</span><span>{uploadProgress}%</span></div>
-                <progress max="100" value={uploadProgress}>{uploadProgress}%</progress>
+                <div><span>{tI18n("Uploading", { defaultValue: "Uploading" })}</span><span>{uploadProgress}{tI18n("%", { defaultValue: "%" })}</span></div>
+                <progress max="100" value={uploadProgress}>{uploadProgress}{tI18n("%", { defaultValue: "%" })}</progress>
               </div>
             )}
             {uploadMessage && <p className="admin-upload-success" role="status">{uploadMessage}</p>}
@@ -562,29 +636,30 @@ export default function AdminArticleEditorPage() {
 }
 
 function ArticlePreview({ article, onClose }) {
+  const { t: tI18n } = useTranslation('admin');
   return (
     <div className="admin-dialog-backdrop admin-preview-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <section className="admin-preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-title">
         <header className="admin-preview-bar">
-          <span><strong>Preview</strong> · unsaved editorial changes</span>
-          <button className="admin-button admin-button--secondary" type="button" onClick={onClose}>Close preview</button>
+          <span><strong>{tI18n("Preview", { defaultValue: "Preview" })}</strong> {tI18n("· unsaved editorial changes", { defaultValue: "· unsaved editorial changes" })}</span>
+          <button className="admin-button admin-button--secondary" type="button" onClick={onClose}>{tI18n("Close preview", { defaultValue: "Close preview" })}</button>
         </header>
         <article className="admin-preview-article">
-          <span className="admin-eyebrow">StartupTN News · Preview</span>
+          <span className="admin-eyebrow">{tI18n("StartupTN News · Preview", { defaultValue: "StartupTN News · Preview" })}</span>
           {article.cover_image_url && (
             <StoryImage className="admin-preview-image" src={article.cover_image_url} alt={article.title} />
           )}
           <ArticleMeta article={article} />
           <h1 id="preview-title">{article.title || 'Your headline will appear here'}</h1>
           <p className="admin-preview-summary">{article.summary || 'Your summary will appear here.'}</p>
-          <p className="admin-preview-byline">By {article.author_name || 'Author name'}</p>
+          <p className="admin-preview-byline">{tI18n("By", { defaultValue: "By" })} {article.author_name || 'Author name'}</p>
           <ArticleContent
             className="admin-preview-content"
             content={article.content || 'Your article content will appear here.'}
           />
-          {article.source_url && <p className="admin-preview-source">Source: {article.source_url}</p>}
+          {article.source_url && <p className="admin-preview-source">{tI18n("Source:", { defaultValue: "Source:" })} {article.source_url}</p>}
         </article>
       </section>
     </div>

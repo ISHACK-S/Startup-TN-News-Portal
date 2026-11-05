@@ -1,11 +1,13 @@
-import { apiRequest } from './client.js';
+import { apiDownload, apiRequest } from './client.js';
 
-function contentQuery(path, { page = 1, limit = 20, q, status, format, provider, signal } = {}) {
+function contentQuery(path, { page = 1, limit = 20, q, status, format, provider, category, featured, signal } = {}) {
   const search = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (q) search.set('q', q);
   if (status) search.set('status', status);
   if (format) search.set('format', format);
   if (provider) search.set('provider', provider);
+  if (category) search.set('category', category);
+  if (featured !== undefined) search.set('featured', String(featured));
   return apiRequest(`${path}?${search}`, { signal });
 }
 
@@ -31,6 +33,18 @@ export function logout() {
 
 export function getSession({ signal } = {}) {
   return apiRequest('/auth/me', { signal }).then((result) => result.data);
+}
+
+export function getMyAdminProfile({ signal } = {}) {
+  return apiRequest('/auth/profile', { signal }).then((result) => result.data.profile);
+}
+
+export function updateMyAdminProfile(changes) {
+  return apiRequest('/auth/profile', { method: 'PATCH', body: changes });
+}
+
+export function changeMyAdminPassword(changes) {
+  return apiRequest('/auth/profile/password', { method: 'PATCH', body: changes });
 }
 
 export function getAdminArticles({ page = 1, limit = 10, q, category, status, signal } = {}) {
@@ -90,9 +104,55 @@ export function getMyAdminPermissions({ signal } = {}) {
     .then((result) => result.data);
 }
 
+export function getAdminWebsiteConfiguration({ signal } = {}) {
+  return apiRequest('/admin/site-config', { signal }).then((result) => result.data);
+}
+
+export function saveAdminWebsiteConfiguration(section, configuration) {
+  return apiRequest(`/admin/site-config/${encodeURIComponent(section)}`, {
+    method: 'PUT',
+    body: configuration
+  }).then((result) => result.data.configuration);
+}
+
+export function publishAdminWebsiteConfiguration(section) {
+  return apiRequest(`/admin/site-config/${encodeURIComponent(section)}/publish`, {
+    method: 'POST',
+    body: {}
+  }).then((result) => result.data.configuration);
+}
+
 export function getPermissionRoles({ signal } = {}) {
   return apiRequest('/admin/access-control/permissions/roles', { signal })
     .then((result) => result.data);
+}
+
+export function createPermissionRole(role) {
+  return apiRequest('/admin/access-control/permissions/roles', {
+    method: 'POST',
+    body: role
+  }).then((result) => result.data);
+}
+
+export function getPermissionRole(roleKey, { signal } = {}) {
+  return apiRequest(
+    `/admin/access-control/permissions/roles/${encodeURIComponent(roleKey)}`,
+    { signal }
+  ).then((result) => result.data);
+}
+
+export function updatePermissionRole(roleKey, changes) {
+  return apiRequest(
+    `/admin/access-control/permissions/roles/${encodeURIComponent(roleKey)}`,
+    { method: 'PATCH', body: changes }
+  ).then((result) => result.data);
+}
+
+export function deletePermissionRole(roleKey) {
+  return apiRequest(
+    `/admin/access-control/permissions/roles/${encodeURIComponent(roleKey)}`,
+    { method: 'DELETE' }
+  ).then((result) => result.data);
 }
 
 export function updatePermissionModule(moduleId, changes) {
@@ -135,6 +195,29 @@ export function removeAdminPermissionOverride(adminId, moduleId, actionId) {
     `/admin/access-control/permissions/accounts/${encodeURIComponent(adminId)}/overrides/${encodeURIComponent(moduleId)}/${encodeURIComponent(actionId)}`,
     { method: 'DELETE' }
   ).then((result) => result.data);
+}
+
+function monthlyReportQuery(filters) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== '' && value !== undefined && value !== null) search.set(key, String(value));
+  }
+  return search.toString();
+}
+
+export function getAdminMonthlyActivityReport(filters, { signal } = {}) {
+  return apiRequest(`/admin/monthly-reports?${monthlyReportQuery(filters)}`, { signal })
+    .then((result) => result.data);
+}
+
+export function getAdminActivityDetails(activityId, { signal } = {}) {
+  return apiRequest(`/admin/monthly-reports/${encodeURIComponent(activityId)}`, { signal })
+    .then((result) => result.data);
+}
+
+export function exportAdminMonthlyActivityReport(format, filters, { signal } = {}) {
+  if (!['csv', 'pdf'].includes(format)) throw new TypeError('Unsupported activity report export format.');
+  return apiDownload(`/admin/monthly-reports/export.${format}?${monthlyReportQuery(filters)}`, { signal });
 }
 
 export function getAdminMediaAssets(options = {}) {

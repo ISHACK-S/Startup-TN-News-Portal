@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { ADMIN_ROLES } from '../services/auth.service.js';
 import { adminPasswordSchema } from './admin-password.js';
 
 const adminIdSchema = z
@@ -21,7 +20,7 @@ export const adminAccountParamsSchema = z.object({
 }).strict();
 
 export const adminAccountUpdateSchema = z.object({
-  role: z.enum(ADMIN_ROLES).optional(),
+  role: z.string().trim().min(1).max(100).optional(),
   isActive: z.boolean().optional()
 }).strict().refine(
   (update) => update.role !== undefined || update.isActive !== undefined,
@@ -32,7 +31,7 @@ export const adminAccountCreateSchema = z.object({
   name: z.string().trim().min(1).max(150),
   email: z.string().trim().email().max(254).transform((email) => email.toLowerCase()),
   password: adminPasswordSchema,
-  role: z.enum(ADMIN_ROLES),
+  role: z.string().trim().min(1).max(100),
   isActive: z.boolean().default(true),
   confirmSuperAdmin: z.boolean().optional()
 }).strict().refine(

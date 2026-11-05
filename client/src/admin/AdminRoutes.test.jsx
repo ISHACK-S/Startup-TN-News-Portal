@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import App from '../App.jsx';
+import { DEFAULT_PUBLIC_WEBSITE_CONFIGURATION } from '../config/public-site-defaults.js';
 
 const categoryData = [
   { id: 1, name: 'Startups', slug: 'startups' },
@@ -14,65 +15,57 @@ let nextArticleId;
 let fetchMock;
 let xhrRequest;
 let currentAdminRole;
+let currentProfile;
 let accessUsers;
 let accessControlFailureStatus;
 let rolePermissionGrants;
 let accountPermissionOverrides;
 let permissionFailureStatus;
+let permissionRoles;
+let storedSiteConfiguration;
+let storedSiteDrafts;
+let siteConfigurationFailureStatus;
+let siteConfigurationFailureDetails;
 
 const registeredModuleRows = [
-  ['overview', 'Overview', 'Core dashboard'],
-  ['news-articles', 'News Articles', 'Core dashboard'],
-  ['profile-settings', 'Profile Settings', 'Core dashboard'],
-  ['monthly-reports', 'Monthly Reports', 'Public-service management'],
-  ['citizen-services', 'Citizen Services', 'Public-service management'],
-  ['faq-management', 'FAQ Management', 'Public-service management'],
-  ['police-stations', 'Police Stations', 'Public-service management'],
-  ['helplines-registry', 'Helplines Registry', 'Public-service management'],
-  ['portal-links', 'Portal Links', 'Public-service management'],
-  ['web-stories', 'Web Stories', 'Content and media'],
-  ['hero-slider', 'Hero Slider', 'Content and media'],
-  ['video-media', 'Video & Media', 'Content and media'],
-  ['media-library', 'Media Library', 'Content and media'],
-  ['official-alerts', 'Official Alerts', 'Content and media'],
-  ['access-control', 'Access Control', 'Access and account administration'],
-  ['user-management', 'User Management', 'Access and account administration'],
-  ['role-builder', 'Role Builder', 'Access and account administration'],
-  ['session-management', 'Session Management', 'Access and account administration'],
-  ['security-events', 'Security Events', 'Access and account administration'],
-  ['audit-logs', 'Audit Logs', 'Access and account administration'],
-  ['branding-theme-editor', 'Branding & Theme Editor', 'Website configuration'],
-  ['menu-management', 'Menu Management', 'Website configuration'],
-  ['footer-management', 'Footer Management', 'Website configuration'],
-  ['seo-management', 'SEO Management', 'Website configuration'],
-  ['system-configuration', 'System Configuration', 'System administration'],
-  ['backup-restore', 'Backup & Restore', 'System administration'],
-  ['api-key-configuration', 'API Key Configuration', 'System administration'],
-  ['smtp-configuration', 'SMTP Configuration', 'System administration']
+  ['overview', 'Overview', 'Dashboard'],
+  ['news-articles', 'News Articles', 'Content Management'],
+  ['web-stories', 'Web Stories', 'Content Management'],
+  ['hero-slider', 'Hero Slider', 'Content Management'],
+  ['video-media', 'Video & Media', 'Media Management'],
+  ['media-library', 'Media Library', 'Media Management'],
+  ['user-management', 'User Management', 'Administration'],
+  ['role-builder', 'Role Builder', 'Administration'],
+  ['access-control', 'Access Control', 'Administration'],
+  ['branding-theme-editor', 'Branding & Theme', 'Website Management'],
+  ['menu-management', 'Menu Management', 'Website Management'],
+  ['footer-management', 'Footer Management', 'Website Management'],
+  ['seo-management', 'SEO Management', 'Website Management']
 ];
 const permissionActions = ['view', 'create', 'edit', 'publish', 'delete', 'manage', 'configure'];
 const privilegedModules = new Set([
-  'access-control', 'user-management', 'role-builder', 'session-management',
-  'security-events', 'audit-logs', 'branding-theme-editor', 'menu-management',
-  'footer-management', 'seo-management', 'system-configuration', 'backup-restore',
-  'api-key-configuration', 'smtp-configuration'
+  'access-control', 'user-management', 'role-builder', 'branding-theme-editor',
+  'menu-management', 'footer-management', 'seo-management'
 ]);
 
 function moduleAvailability(moduleId) {
   return [
     'overview', 'news-articles', 'access-control', 'user-management', 'role-builder',
-    'media-library', 'web-stories', 'hero-slider', 'video-media'
+    'media-library', 'web-stories', 'hero-slider', 'video-media',
+    'branding-theme-editor', 'menu-management', 'footer-management'
   ].includes(moduleId);
 }
 
 function permissionMatrix(role, adminId = null) {
-  const roleKey = role === 'Super Admin' ? 'super-admin' : 'admin';
+  const roleKey = permissionRoles.find((item) => item.role === role)?.roleKey
+    ?? (role === 'Super Admin' ? 'super-admin' : 'admin');
+  const isCustomRole = permissionRoles.some((item) => item.roleKey === roleKey && !item.isBuiltIn);
   return registeredModuleRows.map(([moduleId, label, navigationGroup]) => {
     const isAvailable = moduleAvailability(moduleId);
     const roleActions = Object.fromEntries(permissionActions.map((action) => {
-      const defaultGrant = role === 'Super Admin'
+      const defaultGrant = !isCustomRole && (role === 'Super Admin'
         || (moduleId === 'overview' && action === 'view')
-        || (moduleId === 'news-articles' && ['view', 'create', 'edit', 'publish', 'delete', 'manage'].includes(action));
+        || (moduleId === 'news-articles' && ['view', 'create', 'edit', 'publish', 'delete', 'manage'].includes(action)));
       return [action, rolePermissionGrants.get(`${roleKey}:${moduleId}:${action}`) ?? defaultGrant];
     }));
     const limits = Object.fromEntries(permissionActions.map((action) => [
@@ -115,10 +108,44 @@ function apiResponse(payload, status = 200) {
 function installApi() {
   sessionActive = false;
   currentAdminRole = 'Admin';
+  currentProfile = {
+    id: '4',
+    name: 'Editorial Admin',
+    email: 'editor@example.com',
+    role: 'Admin',
+    isActive: true,
+    createdAt: '2026-10-28T12:00:00.000Z'
+  };
   accessControlFailureStatus = 0;
   permissionFailureStatus = 0;
+  permissionRoles = [
+    {
+      roleKey: 'admin',
+      label: 'Admin',
+      role: 'Admin',
+      description: 'Built-in editorial administrator role.',
+      isActive: true,
+      isBuiltIn: true,
+      isEditable: true,
+      assignedCount: 10
+    },
+    {
+      roleKey: 'super-admin',
+      label: 'Super Admin',
+      role: 'Super Admin',
+      description: 'Protected system role.',
+      isActive: true,
+      isBuiltIn: true,
+      isEditable: false,
+      assignedCount: 1
+    }
+  ];
   rolePermissionGrants = new Map();
   accountPermissionOverrides = new Map();
+  storedSiteConfiguration = JSON.parse(JSON.stringify(DEFAULT_PUBLIC_WEBSITE_CONFIGURATION));
+  storedSiteDrafts = { menu: null, footer: null, branding: null };
+  siteConfigurationFailureStatus = 0;
+  siteConfigurationFailureDetails = null;
   nextArticleId = 3;
   accessUsers = Array.from({ length: 11 }, (_, index) => {
     const id = index + 4;
@@ -181,7 +208,12 @@ function installApi() {
         data: {
           authenticated: sessionActive,
           admin: sessionActive
-            ? { id: 4, name: 'Editorial Admin', email: 'editor@example.com', role: currentAdminRole }
+            ? {
+              id: 4,
+              name: currentProfile.name,
+              email: currentProfile.email,
+              role: currentAdminRole
+            }
             : null
         }
       });
@@ -208,6 +240,24 @@ function installApi() {
       if (!sessionActive) return apiResponse({ error: { message: 'Authentication is required.' } }, 401);
       sessionActive = false;
       return apiResponse({ data: { loggedOut: true } });
+    }
+    if (url.pathname === '/api/auth/profile' && method === 'GET') {
+      if (!sessionActive) return apiResponse({ error: { message: 'Authentication is required.' } }, 401);
+      return apiResponse({ data: { profile: { ...currentProfile } } });
+    }
+    if (url.pathname === '/api/auth/profile' && method === 'PATCH') {
+      if (!sessionActive) return apiResponse({ error: { message: 'Authentication is required.' } }, 401);
+      const changes = JSON.parse(options.body);
+      const emailChanged = changes.email.toLowerCase() !== currentProfile.email;
+      currentProfile = { ...currentProfile, ...changes, email: changes.email.toLowerCase() };
+      return apiResponse({
+        data: { profile: { ...currentProfile } },
+        meta: { emailChanged, otherSessionsInvalidated: emailChanged ? 1 : 0 }
+      });
+    }
+    if (url.pathname === '/api/auth/profile/password' && method === 'PATCH') {
+      if (!sessionActive) return apiResponse({ error: { message: 'Authentication is required.' } }, 401);
+      return apiResponse({ data: { changed: true }, meta: { otherSessionsInvalidated: 2 } });
     }
     if (url.pathname === '/api/categories') return apiResponse({ data: categoryData });
     if (!sessionActive && url.pathname.startsWith('/api/admin/')) {
@@ -237,19 +287,91 @@ function installApi() {
         }
       });
     }
-    if (url.pathname === '/api/admin/access-control/permissions/roles' && method === 'GET') {
+    if (url.pathname === '/api/admin/site-config' && method === 'GET') {
+      return apiResponse({ data: { ...storedSiteConfiguration, drafts: { ...storedSiteDrafts } } });
+    }
+    const siteConfigMatch = url.pathname.match(/^\/api\/admin\/site-config\/(menu|footer|branding)$/);
+    if ((siteConfigMatch || url.pathname.match(/^\/api\/admin\/site-config\/(menu|footer|branding)\/publish$/))
+      && siteConfigurationFailureStatus) {
       return apiResponse({
-        data: [
-          { roleKey: 'admin', label: 'Admin', role: 'Admin', isBuiltIn: true, isEditable: true },
-          { roleKey: 'super-admin', label: 'Super Admin', role: 'Super Admin', isBuiltIn: true, isEditable: false }
-        ]
-      });
+        error: {
+          message: siteConfigurationFailureStatus === 400
+            ? 'Request validation failed.'
+            : 'Configuration service is temporarily unavailable.',
+          ...(siteConfigurationFailureDetails
+            ? { details: siteConfigurationFailureDetails }
+            : {})
+        }
+      }, siteConfigurationFailureStatus);
+    }
+    if (siteConfigMatch && method === 'PUT') {
+      const section = siteConfigMatch[1];
+      storedSiteDrafts[section] = JSON.parse(options.body);
+      return apiResponse({ data: { section, configuration: storedSiteDrafts[section] } });
+    }
+    const publishSiteConfigMatch = url.pathname.match(/^\/api\/admin\/site-config\/(menu|footer|branding)\/publish$/);
+    if (publishSiteConfigMatch && method === 'POST') {
+      const section = publishSiteConfigMatch[1];
+      if (!storedSiteDrafts[section]) {
+        return apiResponse({ error: { message: 'Save a draft before publishing this section.' } }, 409);
+      }
+      storedSiteConfiguration[section] = storedSiteDrafts[section];
+      storedSiteDrafts[section] = null;
+      return apiResponse({ data: { section, configuration: storedSiteConfiguration[section] } });
+    }
+    if (url.pathname === '/api/admin/access-control/permissions/roles' && method === 'GET') {
+      return apiResponse({ data: permissionRoles });
+    }
+    if (url.pathname === '/api/admin/access-control/permissions/roles' && method === 'POST') {
+      const payload = JSON.parse(options.body);
+      if (permissionRoles.some((role) => role.roleKey === payload.roleKey || role.label === payload.label)) {
+        return apiResponse({ error: { message: 'A role with that name or identifier already exists.' } }, 409);
+      }
+      const created = {
+        roleKey: payload.roleKey,
+        label: payload.label,
+        role: payload.label,
+        description: payload.description,
+        isActive: payload.isActive,
+        isBuiltIn: false,
+        isEditable: false,
+        assignedCount: 0
+      };
+      permissionRoles.push(created);
+      for (const module of payload.permissions ?? []) {
+        for (const [action, allowed] of Object.entries(module.actions)) {
+          rolePermissionGrants.set(`${created.roleKey}:${module.moduleId}:${action}`, allowed);
+        }
+      }
+      return apiResponse({
+        data: {
+          roleKey: created.roleKey,
+          role: created.label,
+          label: created.label,
+          description: created.description,
+          isActive: created.isActive,
+          isBuiltIn: false,
+          modules: permissionMatrix(created.label)
+        }
+      }, 201);
     }
     const rolePermissionMatch = url.pathname.match(/^\/api\/admin\/access-control\/permissions\/roles\/([^/]+)\/permissions$/);
     if (rolePermissionMatch && method === 'GET') {
       const roleKey = decodeURIComponent(rolePermissionMatch[1]);
-      const role = roleKey === 'super-admin' ? 'Super Admin' : 'Admin';
-      return apiResponse({ data: { roleKey, role, modules: permissionMatrix(role) } });
+      const role = permissionRoles.find((item) => item.roleKey === roleKey)?.role
+        ?? (roleKey === 'super-admin' ? 'Super Admin' : 'Admin');
+      const roleInfo = permissionRoles.find((item) => item.roleKey === roleKey);
+      return apiResponse({
+        data: {
+          roleKey,
+          role,
+          label: role,
+          description: roleInfo?.description ?? '',
+          isActive: roleInfo?.isActive ?? true,
+          isBuiltIn: roleInfo?.isBuiltIn ?? false,
+          modules: permissionMatrix(role)
+        }
+      });
     }
     if (rolePermissionMatch && method === 'PATCH') {
       const roleKey = decodeURIComponent(rolePermissionMatch[1]);
@@ -259,8 +381,50 @@ function installApi() {
           rolePermissionGrants.set(`${roleKey}:${module.moduleId}:${action}`, allowed);
         }
       }
-      const role = roleKey === 'super-admin' ? 'Super Admin' : 'Admin';
-      return apiResponse({ data: { roleKey, role, modules: permissionMatrix(role) } });
+      const role = permissionRoles.find((item) => item.roleKey === roleKey)?.role
+        ?? (roleKey === 'super-admin' ? 'Super Admin' : 'Admin');
+      return apiResponse({ data: { roleKey, role, label: role, modules: permissionMatrix(role) } });
+    }
+    const roleDetailsMatch = url.pathname.match(/^\/api\/admin\/access-control\/permissions\/roles\/([^/]+)$/);
+    if (roleDetailsMatch && method === 'PATCH') {
+      const roleKey = decodeURIComponent(roleDetailsMatch[1]);
+      const role = permissionRoles.find((item) => item.roleKey === roleKey);
+      if (!role || role.isBuiltIn) return apiResponse({ error: { message: 'The role was not found.' } }, 404);
+      const changes = JSON.parse(options.body);
+      Object.assign(role, {
+        label: changes.label ?? role.label,
+        role: changes.label ?? role.label,
+        description: changes.description ?? role.description,
+        isActive: changes.isActive ?? role.isActive
+      });
+      for (const module of changes.permissions ?? []) {
+        for (const [action, allowed] of Object.entries(module.actions)) {
+          rolePermissionGrants.set(`${roleKey}:${module.moduleId}:${action}`, allowed);
+        }
+      }
+      return apiResponse({
+        data: {
+          roleKey,
+          role: role.label,
+          label: role.label,
+          description: role.description,
+          isActive: role.isActive,
+          isBuiltIn: false,
+          modules: permissionMatrix(role.label)
+        }
+      });
+    }
+    if (roleDetailsMatch && method === 'DELETE') {
+      const roleKey = decodeURIComponent(roleDetailsMatch[1]);
+      const roleIndex = permissionRoles.findIndex((item) => item.roleKey === roleKey);
+      if (roleIndex < 0 || permissionRoles[roleIndex].isBuiltIn) {
+        return apiResponse({ error: { message: 'The role was not found.' } }, 404);
+      }
+      if (permissionRoles[roleIndex].assignedCount > 0) {
+        return apiResponse({ error: { message: 'Reassign those accounts in User Management before deleting the role.' } }, 409);
+      }
+      permissionRoles.splice(roleIndex, 1);
+      return apiResponse({ data: { roleKey, deleted: true } });
     }
     const accountPermissionMatch = url.pathname.match(/^\/api\/admin\/access-control\/permissions\/accounts\/([^/]+)\/permissions$/);
     if (accountPermissionMatch && method === 'GET') {
@@ -448,6 +612,7 @@ class MockUploadRequest {
     this.responseText = JSON.stringify({
       data: {
         url: 'https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/new.png',
+        secure_url: 'https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/new.png',
         provider_id: 'startuptn-news/articles/new'
       }
     });
@@ -541,7 +706,8 @@ describe('admin CMS', () => {
     await user.type(screen.getByLabelText('Email Address'), 'NEW.USER@example.com');
     await user.type(screen.getByLabelText('Initial Password'), 'Strong-password-123!');
     await user.type(screen.getByLabelText('Confirm Password'), 'Strong-password-123!');
-    expect(screen.getByLabelText('Role')).toHaveValue('Admin');
+    const createDialog = screen.getByRole('dialog', { name: 'Create administrator account' });
+    expect(await within(createDialog).findByRole('combobox', { name: /^Role/ })).toHaveValue('Admin');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Account' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('New User was created successfully.');
@@ -576,7 +742,8 @@ describe('admin CMS', () => {
     await user.type(screen.getByLabelText('Email Address'), 'elevated@example.com');
     await user.type(screen.getByLabelText('Initial Password'), 'Strong-password-123!');
     await user.type(screen.getByLabelText('Confirm Password'), 'Strong-password-123!');
-    await user.selectOptions(screen.getByLabelText('Role'), 'Super Admin');
+    const createDialog = screen.getByRole('dialog', { name: 'Create administrator account' });
+    await user.selectOptions(await within(createDialog).findByRole('combobox', { name: /^Role/ }), 'Super Admin');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Account' }));
     expect(screen.getByRole('alert')).toHaveTextContent('Confirm the elevated Super Admin role.');
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -668,6 +835,241 @@ describe('admin CMS', () => {
     expect(screen.queryByRole('heading', { name: 'Web Stories' })).not.toBeInTheDocument();
   });
 
+  it('keeps all public configuration editors Super Admin-only', async () => {
+    currentAdminRole = 'Super Admin';
+    const editors = [
+      ['/admin/menu-management', 'Menu Management'],
+      ['/admin/footer-management', 'Footer Editor'],
+      ['/admin/branding', 'Branding & Theme Editor']
+    ];
+    for (const [path, heading] of editors) {
+      sessionActive = false;
+      const user = userEvent.setup();
+      renderApp(path);
+      await signIn(user);
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+      cleanup();
+    }
+
+    currentAdminRole = 'Admin';
+    sessionActive = false;
+    const regularAdminUser = userEvent.setup();
+    renderApp('/admin/menu-management');
+    await signIn(regularAdminUser);
+    expect(await screen.findByRole('heading', { name: 'You don’t have access to this module.' })).toBeInTheDocument();
+  });
+
+  it('saves menu changes as a draft and only updates public configuration after publishing', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/menu-management');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Menu Management' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Website Management/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Branding & Theme' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Footer Editor' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+    await user.clear(screen.getByLabelText('English label'));
+    await user.type(screen.getByLabelText('English label'), 'Front page');
+    await user.click(screen.getByRole('button', { name: 'Apply to draft' }));
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(storedSiteDrafts.menu?.[0].labelEn).toBe('Front page'));
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+    expect(storedSiteConfiguration.menu[0].labelEn).toBe('Home');
+    expect(screen.getByRole('status')).toHaveTextContent('Menu draft saved.');
+
+    await user.click(screen.getByRole('button', { name: 'Publish', exact: true }));
+    await waitFor(() => expect(storedSiteDrafts.menu).toBeNull());
+    expect(storedSiteConfiguration.menu[0].labelEn).toBe('Front page');
+    expect(screen.getByRole('status')).toHaveTextContent('Public navigation published successfully.');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/site-config/menu/publish',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    );
+  });
+
+  it('enables publishing a footer draft only after changed text is saved', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/footer-management');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Footer Editor' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    await user.clear(screen.getByLabelText('Copyright text (English)'));
+    await user.type(screen.getByLabelText('Copyright text (English)'), 'Updated copyright');
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(storedSiteDrafts.footer?.copyrightEn).toBe('Updated copyright'));
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+    expect(storedSiteConfiguration.footer.copyrightEn).not.toBe('Updated copyright');
+    cleanup();
+    renderApp('/admin/footer-management');
+    await screen.findByRole('heading', { name: 'Footer Editor' });
+    expect(screen.getByLabelText('Copyright text (English)')).toHaveValue('Updated copyright');
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Publish', exact: true }));
+    await waitFor(() => expect(storedSiteConfiguration.footer.copyrightEn).toBe('Updated copyright'));
+    expect(screen.getByRole('status')).toHaveTextContent('Public footer published successfully.');
+    cleanup();
+    renderApp('/admin/footer-management');
+    await screen.findByRole('heading', { name: 'Footer Editor' });
+    expect(screen.getByLabelText('Copyright text (English)')).toHaveValue('Updated copyright');
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+  });
+
+  it('enables publishing a branding color only after the changed theme is saved', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/branding');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Branding & Theme Editor' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeDisabled();
+    const colorInput = screen.getByLabelText('Primary colour hex value');
+    await user.clear(colorInput);
+    await user.type(colorInput, '#243a78');
+    expect(screen.getByRole('button', { name: 'Save Draft' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(storedSiteDrafts.branding?.primaryColor).toBe('#243a78'));
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+    expect(storedSiteConfiguration.branding.primaryColor).not.toBe('#243a78');
+    await user.click(screen.getByRole('button', { name: 'Publish', exact: true }));
+    await waitFor(() => expect(storedSiteConfiguration.branding.primaryColor).toBe('#243a78'));
+    expect(screen.getByRole('status')).toHaveTextContent('Public website branding published successfully.');
+  });
+
+  it('sends the branding schema payload and displays safe backend validation details', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/branding');
+    await signIn(user);
+    await screen.findByRole('heading', { name: 'Branding & Theme Editor' });
+
+    const primaryColor = screen.getByLabelText('Primary colour hex value');
+    await user.clear(primaryColor);
+    await user.type(primaryColor, '#ffffff');
+    siteConfigurationFailureStatus = 400;
+    siteConfigurationFailureDetails = [
+      {
+        path: 'primaryColor',
+        message: 'Primary colour needs stronger contrast against white.'
+      },
+      {
+        path: 'accentColor',
+        message: 'Accent colour needs stronger contrast against the primary colour.'
+      }
+    ];
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Request validation failed. primaryColor: Primary colour needs stronger contrast against white. accentColor: Accent colour needs stronger contrast against the primary colour.'
+    );
+    const [, options] = fetchMock.mock.calls.find(([url, opts]) =>
+      url === '/api/admin/site-config/branding' && opts.method === 'PUT'
+    );
+    expect(JSON.parse(options.body)).toEqual({
+      logoUrl: '',
+      footerLogoUrl: '',
+      faviconUrl: '',
+      websiteName: 'StartupTN News',
+      tagline: '',
+      primaryColor: '#ffffff',
+      secondaryColor: '#101b3b',
+      accentColor: '#ffbe24',
+      backgroundColor: '#f8f7f4',
+      textColor: '#17283e',
+      fontFamily: 'Inter'
+    });
+    expect(storedSiteDrafts.branding).toBeNull();
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
+  });
+
+  it('retains failed draft and publish changes and allows retrying both requests', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/footer-management');
+    await signIn(user);
+    await screen.findByRole('heading', { name: 'Footer Editor' });
+    const copyright = screen.getByLabelText('Copyright text (English)');
+    await user.clear(copyright);
+    await user.type(copyright, 'Retryable footer draft');
+
+    siteConfigurationFailureStatus = 503;
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Configuration service is temporarily unavailable.');
+    expect(copyright).toHaveValue('Retryable footer draft');
+    expect(storedSiteDrafts.footer).toBeNull();
+
+    siteConfigurationFailureStatus = 0;
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+    await waitFor(() => expect(storedSiteDrafts.footer?.copyrightEn).toBe('Retryable footer draft'));
+    expect(screen.getByRole('button', { name: 'Publish', exact: true })).toBeEnabled();
+
+    siteConfigurationFailureStatus = 503;
+    await user.click(screen.getByRole('button', { name: 'Publish', exact: true }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Configuration service is temporarily unavailable.');
+    expect(storedSiteDrafts.footer?.copyrightEn).toBe('Retryable footer draft');
+    expect(storedSiteConfiguration.footer.copyrightEn).not.toBe('Retryable footer draft');
+
+    siteConfigurationFailureStatus = 0;
+    await user.click(screen.getByRole('button', { name: 'Publish', exact: true }));
+    await waitFor(() => expect(storedSiteConfiguration.footer.copyrightEn).toBe('Retryable footer draft'));
+  });
+
+  it('manages footer social links through the draft and publish workflow', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/footer-management');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Footer Editor' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Add social link' }));
+    await user.type(screen.getByLabelText('Platform / label'), 'LinkedIn');
+    await user.clear(screen.getByLabelText('Secure URL (HTTPS)'));
+    await user.type(screen.getByLabelText('Secure URL (HTTPS)'), 'https://www.linkedin.com/company/startuptn');
+    await user.click(screen.getByRole('button', { name: 'Save Draft' }));
+
+    await waitFor(() => {
+      expect(storedSiteDrafts.footer.socialLinks[0]).toMatchObject({
+        label: 'LinkedIn',
+        url: 'https://www.linkedin.com/company/startuptn',
+        isVisible: true
+      });
+    });
+    expect(storedSiteConfiguration.footer.socialLinks).toHaveLength(0);
+    await user.click(screen.getByRole('button', { name: 'Publish', exact: true }));
+    await waitFor(() => expect(storedSiteConfiguration.footer.socialLinks).toHaveLength(1));
+  });
+
+  it('uploads branding assets through the existing media upload API', async () => {
+    currentAdminRole = 'Super Admin';
+    vi.stubGlobal('XMLHttpRequest', MockUploadRequest);
+    const user = userEvent.setup();
+    renderApp('/admin/branding');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Branding & Theme Editor' })).toBeInTheDocument();
+    const uploadInput = screen.getAllByLabelText('Upload image')[0];
+    await user.upload(uploadInput, new File([new Uint8Array([1, 2, 3])], 'logo.png', { type: 'image/png' }));
+    expect(await screen.findByLabelText('Main website logo')).toHaveValue(
+      'https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/new.png'
+    );
+    expect(xhrRequest.url).toBe('/api/admin/media/uploads');
+    expect(xhrRequest.withCredentials).toBe(true);
+  });
+
   it('saves web story slides using the validated API payload', async () => {
     currentAdminRole = 'Super Admin';
     const user = userEvent.setup();
@@ -711,6 +1113,74 @@ describe('admin CMS', () => {
     expect(screen.queryByRole('heading', { name: 'Role Builder' })).not.toBeInTheDocument();
   });
 
+  it('lets Admin and Super Admin manage their own profile without module permissions', async () => {
+    const user = userEvent.setup();
+    renderApp('/admin/profile');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Profile Settings' })).toBeInTheDocument();
+    expect(screen.getByText('Account Information')).toBeInTheDocument();
+    expect(screen.getByText('Admin', { selector: 'dd' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Profile Settings' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/profile',
+      expect.objectContaining({ credentials: 'include' })
+    );
+
+    await user.clear(screen.getByLabelText('Full name'));
+    await user.type(screen.getByLabelText('Full name'), 'Updated Editor');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Your account information was updated.');
+    expect(screen.getByText('Updated Editor', { selector: 'dd' })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/profile',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Updated Editor', email: 'editor@example.com' })
+      })
+    );
+
+    currentAdminRole = 'Super Admin';
+    currentProfile.role = currentAdminRole;
+    cleanup();
+    renderApp('/admin/profile');
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Profile Settings' })).toBeInTheDocument());
+    expect(screen.getByText('Super Admin', { selector: 'dd' })).toBeInTheDocument();
+  });
+
+  it('keeps Profile Settings reachable when the permission service is unavailable', async () => {
+    permissionFailureStatus = 503;
+    const user = userEvent.setup();
+    renderApp('/admin/profile');
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'Profile Settings' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Account Information' })).toBeInTheDocument();
+    expect(screen.getAllByRole('alert').some((alert) =>
+      alert.textContent.includes('Permission data is unavailable.')
+    )).toBe(true);
+  });
+
+  it('validates password confirmation and exposes password visibility controls', async () => {
+    const user = userEvent.setup();
+    renderApp('/admin/profile');
+    await signIn(user);
+    await screen.findByRole('heading', { name: 'Change Password' });
+
+    await user.type(screen.getByLabelText('Current password'), 'current-password');
+    await user.type(screen.getByLabelText('New password'), 'StrongPassword123!');
+    await user.type(screen.getByLabelText('Confirm new password'), 'DifferentPassword123!');
+    await user.click(screen.getByRole('button', { name: 'Change password' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The passwords do not match.');
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/auth/profile/password',
+      expect.anything()
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Show current password' }));
+    expect(screen.getByLabelText('Current password')).toHaveAttribute('type', 'text');
+  });
+
   it('fails closed and shows a retryable error when effective permissions cannot load', async () => {
     permissionFailureStatus = 503;
     const user = userEvent.setup();
@@ -734,6 +1204,18 @@ describe('admin CMS', () => {
 
     expect(await screen.findByRole('heading', { name: 'Role Builder' })).toBeInTheDocument();
     const deletePermission = await screen.findByRole('checkbox', { name: 'Delete News Articles' });
+    for (const group of [
+      'Dashboard', 'Content Management', 'Media Management', 'Administration', 'Website Management'
+    ]) {
+      expect(screen.getByText(group, { selector: '.admin-eyebrow' })).toBeInTheDocument();
+    }
+    for (const obsoleteModule of [
+      'Citizen Services', 'Police Stations', 'Helplines Registry',
+      'Portal Links', 'FAQ Management'
+    ]) {
+      expect(screen.queryByText(obsoleteModule)).not.toBeInTheDocument();
+    }
+    expect(screen.getByText('SEO Management')).toBeInTheDocument();
     expect(deletePermission).toBeChecked();
     await user.click(deletePermission);
     await user.click(screen.getByRole('button', { name: 'Review 1 change' }));
@@ -752,6 +1234,90 @@ describe('admin CMS', () => {
     );
     expect(screen.getByRole('checkbox', { name: 'Delete News Articles' })).not.toBeChecked();
   });
+
+  it('creates a persisted custom role and exposes active roles in User Management', async () => {
+    currentAdminRole = 'Super Admin';
+    const user = userEvent.setup();
+    renderApp('/admin/role-builder');
+    await signIn(user);
+    await screen.findByRole('heading', { name: 'Role Builder' });
+
+    await user.click(screen.getByRole('button', { name: 'Create New Role' }));
+    await user.type(await screen.findByRole('textbox', { name: /Role Name/ }), 'Copy Editor');
+    expect(screen.getByRole('textbox', { name: /Role Identifier/ })).toHaveValue('copy-editor');
+    await user.type(screen.getByRole('textbox', { name: 'Description' }), 'Edits newsroom copy.');
+    const groups = [...document.querySelectorAll('.admin-custom-role-form .admin-permission-group')];
+    const contentGroup = groups.find((group) =>
+      group.querySelector('.admin-eyebrow')?.textContent === 'Content Management');
+    expect(contentGroup).toBeTruthy();
+    await user.click(within(contentGroup).getByRole('button', { name: 'Select category' }));
+    expect(screen.getByRole('checkbox', { name: 'Delete News Articles' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'View Overview' })).not.toBeChecked();
+    await user.click(within(contentGroup).getByRole('button', { name: 'Clear category' }));
+    expect(screen.getByRole('checkbox', { name: 'View Overview' })).not.toBeChecked();
+    const viewArticles = screen.getByRole('checkbox', { name: 'View News Articles' });
+    await user.click(viewArticles);
+    expect(screen.getByText('1 permissions selected')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Create Role' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Role "Copy Editor" was created.');
+    expect(permissionRoles.some((role) => role.roleKey === 'copy-editor' && role.isActive)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/access-control/permissions/roles',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"roleKey":"copy-editor"')
+      })
+    );
+    const createPayload = JSON.parse(fetchMock.mock.calls.find(([url, options]) =>
+      url === '/api/admin/access-control/permissions/roles' && options?.method === 'POST'
+    )[1].body);
+    expect(createPayload.permissions).toEqual([
+      { moduleId: 'news-articles', actions: { view: true } }
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Edit role' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Edit News Articles' }));
+    await user.click(screen.getByRole('button', { name: 'Save Role' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Role "Copy Editor" was updated.');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/admin/access-control/permissions/roles/copy-editor',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: expect.stringContaining('"edit":true')
+      })
+    );
+
+    await user.click(screen.getByRole('link', { name: 'User Management' }));
+    const assignRole = await screen.findByRole('combobox', { name: 'Role for News Admin 5' });
+    expect(within(assignRole).getByRole('option', { name: 'Copy Editor' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('link', { name: 'Role Builder' }));
+    await screen.findByRole('heading', { name: 'Role Builder' });
+    await user.selectOptions(screen.getByLabelText('Selected role'), 'copy-editor');
+    await screen.findByText('Copy Editor', { selector: '.admin-role-explainer strong' });
+    await user.click(screen.getByRole('button', { name: 'Edit role' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Role Status' }), 'inactive');
+    await user.click(screen.getByRole('button', { name: 'Save Role' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Role "Copy Editor" was updated.');
+
+    await user.click(screen.getByRole('link', { name: 'User Management' }));
+    await screen.findByRole('combobox', { name: 'Role for News Admin 5' });
+    await user.click(screen.getByRole('button', { name: 'Create Account' }));
+    const accountDialog = await screen.findByRole('dialog', { name: 'Create administrator account' });
+    expect(within(accountDialog).queryByRole('option', { name: 'Copy Editor' })).not.toBeInTheDocument();
+    await user.click(within(accountDialog).getByRole('button', { name: 'Cancel' }));
+
+    await user.click(screen.getByRole('link', { name: 'Role Builder' }));
+    await screen.findByRole('heading', { name: 'Role Builder' });
+    await user.selectOptions(screen.getByLabelText('Selected role'), 'copy-editor');
+    await screen.findByRole('button', { name: 'Delete role' });
+    await user.click(screen.getByRole('button', { name: 'Delete role' }));
+    const deleteDialog = screen.getByRole('alertdialog');
+    await user.click(within(deleteDialog).getByRole('button', { name: 'Delete role' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Role "Copy Editor" was deleted.');
+    expect(permissionRoles.some((role) => role.roleKey === 'copy-editor')).toBe(false);
+  }, 15000);
 
   it('sets and resets account permission overrides through the backend contract', async () => {
     currentAdminRole = 'Super Admin';

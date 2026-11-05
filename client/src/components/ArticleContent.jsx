@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 import { getStandaloneInlineImage, splitInlineImageTokens } from '../utils/article-content.js';
+import ArticleVideoEmbed from './ArticleVideoEmbed.jsx';
 
 export default function ArticleContent({ content, className = '' }) {
   const paragraphs = content
@@ -12,6 +13,10 @@ export default function ArticleContent({ content, className = '' }) {
       {paragraphs.map((lines, paragraphIndex) => {
         const paragraph = lines.join('\n');
         const standaloneImage = getStandaloneInlineImage(paragraph);
+        const videoToken = paragraph.match(/^\s*\{\{video:(\d+)\}\}\s*$/);
+        if (videoToken) {
+          return <ArticleVideoEmbed id={videoToken[1]} key={paragraphIndex} />;
+        }
         if (standaloneImage) {
           return (
             <img

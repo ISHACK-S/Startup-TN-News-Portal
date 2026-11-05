@@ -1,6 +1,5 @@
 import { pool } from '../database/pool.js';
 import { HttpError } from '../errors/http-error.js';
-import { ADMIN_ROLES } from '../services/auth.service.js';
 import { resolvePermissionForAdmin } from '../services/permissions.service.js';
 
 function clearSessionCookie(request, response) {
@@ -52,20 +51,28 @@ function loadCurrentAdmin(request, response, next, optional) {
       !account
       || Number(account.is_active) !== 1
       || sessionVersion !== Number(account.auth_version)
-      || !ADMIN_ROLES.includes(account.role)
     ) {
       destroyStaleSession(request, response, next, optional);
       return;
     }
 
-    request.admin = {
-      id: account.id,
-      name: account.name,
-      email: account.email,
-      role: account.role,
-      authVersion: Number(account.auth_version)
-    };
-    next();
+    database.execute(
+      'SELECT role_key, is_active FROM permission_roles WHERE label = ? LIMIT 1',
+      [account.role]
+    ).then(([roleRows]) => {
+      if (!roleRows[0] || Number(roleRows[0].is_active) !== 1) {
+        destroyStaleSession(request, response, next, optional);
+        return;
+      }
+      request.admin = {
+        id: account.id,
+        name: account.name,
+        email: account.email,
+        role: account.role,
+        authVersion: Number(account.auth_version)
+      };
+      next();
+    }).catch(next);
   }).catch(next);
 }
 

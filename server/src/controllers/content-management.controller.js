@@ -11,6 +11,9 @@ import {
   getHeroSlide,
   getMediaAsset,
   getPublicWebStory,
+  getPublicVideo,
+  getFeaturedVideo,
+  getVideoCategories,
   getVideo,
   listHeroSlides,
   listMediaAssets,
@@ -175,4 +178,17 @@ export const publicVideosController = asyncHandler(async (request, response) => 
   response.status(200).json(await listVideos(
     request.validated.query, request.app.locals.database, { publicOnly: true }
   ));
+});
+
+export const publicVideoController = asyncHandler(async (request, response) => {
+  const record = await getPublicVideo(request.validated.params.id, request.app.locals.database);
+  response.status(200).json({ data: requireRecord(record, 'Video') });
+});
+
+export const publicFeaturedVideoController = asyncHandler(async (request, response) => {
+  response.status(200).json({ data: await getFeaturedVideo(request.app.locals.database) });
+});
+
+export const publicVideoCategoriesController = asyncHandler(async (request, response) => {
+  response.status(200).json({ data: getVideoCategories() });
 });

@@ -19,6 +19,7 @@ let databaseAvailable = true;
 let articles;
 let adminHash;
 const uploadedImageBufferSizes = [];
+const activityLogs = [];
 let uploadedBuffer;
 let imageUploadFailure = false;
 let mediaAssets = [];
@@ -70,6 +71,10 @@ function createFakeDatabase() {
         if (!databaseAvailable) throw new Error('Database connection failed.');
         return [[{ ok: 1 }]];
       }
+      if (sql.startsWith('INSERT INTO admin_activity_logs')) {
+        activityLogs.push(values);
+        return [{ affectedRows: 1 }];
+      }
       if (sql.startsWith('INSERT INTO media_assets')) {
         const [publicId, secureUrl, resourceType, format, width, height, bytes, originalFilename] = values;
         if (!mediaAssets.some((asset) => asset.cloudinary_public_id === publicId)) {
@@ -97,14 +102,16 @@ function createFakeDatabase() {
       if (sql.includes('FROM admins WHERE id = ?')) {
         return [[admin.id === Number(values[0]) ? { ...admin } : undefined].filter(Boolean)];
       }
+      if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+        const role = values[0] === 'Super Admin' ? 'super-admin' : 'admin';
+        return [[{ role_key: role, is_active: 1 }]];
+      }
       if (sql.startsWith('SELECT modules.module_id')) {
         const roleKey = values[0];
         const accountId = Number(values[2]);
         const protectedModules = new Set([
-          'access-control', 'user-management', 'role-builder', 'session-management',
-          'security-events', 'audit-logs', 'branding-theme-editor', 'menu-management',
-          'footer-management', 'seo-management', 'system-configuration', 'backup-restore',
-          'api-key-configuration', 'smtp-configuration'
+          'access-control', 'user-management', 'role-builder', 'branding-theme-editor',
+          'menu-management', 'footer-management', 'seo-management'
         ]);
         return [[...PERMISSION_MODULES.flatMap((module) => PERMISSION_ACTIONS.map((actionId) => {
           const isSuperAdmin = roleKey === 'super-admin';
@@ -352,6 +359,7 @@ describe('admin authentication and article API', () => {
   it('validates article input, rejects duplicate slugs, and performs CRUD', async () => {
     const agent = request.agent(app);
     await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
+    activityLogs.length = 0;
 
     const invalid = await agent.post('/api/admin/articles').send({
       title: 'Invalid category',
@@ -380,6 +388,11 @@ describe('admin authentication and article API', () => {
       created.body.data.cover_image_url,
       'https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/test.png'
     );
+    const creationActivity = activityLogs.find((activity) => activity[4] === 'article.published');
+    assert.ok(creationActivity);
+    assert.equal(creationActivity[0], admin.id);
+    assert.equal(creationActivity[3], admin.role);
+    assert.equal(creationActivity[7], String(created.body.data.id));
 
     const duplicate = await agent.post('/api/admin/articles').send({
       title: 'Duplicate story',
@@ -406,6 +419,7 @@ describe('admin authentication and article API', () => {
       id: created.body.data.id,
       status: 'draft',
       title: 'Updated story',
+      content: 'Updated article content',
       cover_image_url: 'https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/updated.png'
     });
     assert.equal(patched.status, 200);
@@ -415,6 +429,10 @@ describe('admin authentication and article API', () => {
       patched.body.data.cover_image_url,
       'https://res.cloudinary.com/startuptn/image/upload/startuptn-news/articles/updated.png'
     );
+    const editActivity = activityLogs.find((activity) => activity[4] === 'article.unpublished');
+    assert.ok(editActivity);
+    assert.match(editActivity[9], /"content"/);
+    assert.doesNotMatch(editActivity[9], /Updated article content/);
     const unpublishedListing = await request(app).get('/api/news?q=Updated');
     assert.equal(unpublishedListing.status, 200);
     assert.equal(unpublishedListing.body.data.some((article) => article.id === created.body.data.id), false);

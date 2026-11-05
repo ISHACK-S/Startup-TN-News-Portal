@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { getMyAdminPermissions } from '../api/admin.js';
@@ -6,6 +7,7 @@ import { AdminError, AdminLoading } from './components/AdminStates.jsx';
 const AdminPermissionContext = createContext(null);
 
 export function AdminPermissionsProvider({ children }) {
+  const { t: tI18n } = useTranslation('admin');
   const [permissions, setPermissions] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -13,12 +15,12 @@ export function AdminPermissionsProvider({ children }) {
   const loadPermissions = useCallback(async ({ signal, silent = false } = {}) => {
     if (!silent) {
       setLoading(true);
-      setError('');
+      setError("");
     }
     try {
       const current = await getMyAdminPermissions({ signal });
       setPermissions(current);
-      setError('');
+      setError("");
       return current;
     } catch (loadError) {
       if (loadError.name !== 'AbortError') {
@@ -75,6 +77,7 @@ export function useAdminPermissions() {
 }
 
 export function RequireAdminPermission({ moduleId, actionId = 'view' }) {
+  const { t: tI18n } = useTranslation('admin');
   const { loading, error, hasPermission, refreshPermissions } = useAdminPermissions();
 
   if (loading) return <AdminLoading label="Loading your permissions…" />;
@@ -82,9 +85,9 @@ export function RequireAdminPermission({ moduleId, actionId = 'view' }) {
   if (!hasPermission(moduleId, actionId)) {
     return (
       <section className="admin-denied" role="alert">
-        <span className="admin-eyebrow">Access restricted</span>
-        <h1>You don’t have access to this module.</h1>
-        <p>Your current permissions do not allow this page. Contact a Super Admin if you need access.</p>
+        <span className="admin-eyebrow">{tI18n("Access restricted", { defaultValue: "Access restricted" })}</span>
+        <h1>{tI18n("You don’t have access to this module.", { defaultValue: "You don’t have access to this module." })}</h1>
+        <p>{tI18n("Your current permissions do not allow this page. Contact a Super Admin if you need access.", { defaultValue: "Your current permissions do not allow this page. Contact a Super Admin if you need access." })}</p>
       </section>
     );
   }

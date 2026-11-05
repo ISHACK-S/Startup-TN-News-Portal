@@ -10,10 +10,20 @@ import {
 
 const ACCESS_CONTROL_MODULE = 'access-control';
 
-function roleKeyFor(role) {
-  const roleKey = BUILT_IN_ROLES[role];
-  if (!roleKey) throw new HttpError(503, 'Permission data is unavailable.');
-  return roleKey;
+async function roleKeyFor(role, database) {
+  const builtInRoleKey = BUILT_IN_ROLES[role];
+  if (builtInRoleKey) return builtInRoleKey;
+  const [rows] = await database.execute(
+    'SELECT role_key, is_active FROM permission_roles WHERE label = ? LIMIT 1',
+    [role]
+  );
+  if (!rows[0]) {
+    throw new HttpError(503, 'Permission data is unavailable.');
+  }
+  if (Number(rows[0].is_active) !== 1) {
+    throw new HttpError(403, 'The assigned administrator role is inactive or unavailable.');
+  }
+  return rows[0].role_key;
 }
 
 function assertKnownModule(moduleId) {
@@ -78,6 +88,8 @@ export async function listPermissionModules(database = pool) {
   ) {
     throw new HttpError(503, 'Permission data is unavailable.');
   }
+  const moduleOrder = new Map(PERMISSION_MODULE_IDS.map((moduleId, index) => [moduleId, index]));
+  rows.sort((left, right) => moduleOrder.get(left.module_id) - moduleOrder.get(right.module_id));
   return rows.map((row) => ({
     moduleId: row.module_id,
     label: row.label,
@@ -91,28 +103,28 @@ export async function listPermissionModules(database = pool) {
 
 export async function listPermissionRoles(database = pool) {
   const [rows] = await database.execute(
-    'SELECT role_key, label, is_builtin FROM permission_roles ORDER BY role_key'
+    `SELECT roles.role_key, roles.label, roles.description, roles.is_builtin, roles.is_active,
+            (SELECT COUNT(*) FROM admins WHERE admins.role = roles.label) AS assigned_count
+     FROM permission_roles AS roles ORDER BY roles.is_builtin DESC, roles.label`
   );
-  const roles = rows
-    .filter((row) => PERMISSION_ROLE_KEYS.includes(row.role_key))
-    .map((row) => {
-      const role = Object.keys(BUILT_IN_ROLES).find((name) => BUILT_IN_ROLES[name] === row.role_key);
-      if (!role || Number(row.is_builtin) !== 1) {
-        throw new HttpError(503, 'Permission data is inconsistent.');
-      }
-      return {
-        roleKey: row.role_key,
-        label: row.label,
-        role,
-        isBuiltIn: true,
-        isEditable: row.role_key !== BUILT_IN_ROLES['Super Admin']
-      };
-    });
+  const roles = rows.map((row) => ({
+    roleKey: row.role_key,
+    label: row.label,
+    role: row.label,
+    description: row.description,
+    isActive: Number(row.is_active) === 1,
+    isBuiltIn: Number(row.is_builtin) === 1,
+    isEditable: row.role_key !== BUILT_IN_ROLES['Super Admin'],
+    assignedCount: Number(row.assigned_count)
+  }));
+  const builtInRoles = new Set(roles.filter((role) => role.isBuiltIn).map((role) => role.roleKey));
   if (
-    roles.length !== PERMISSION_ROLE_KEYS.length
-    || PERMISSION_ROLE_KEYS.some((roleKey) => !roles.some((role) => role.roleKey === roleKey))
+    PERMISSION_ROLE_KEYS.some((roleKey) => !builtInRoles.has(roleKey))
   ) {
     throw new HttpError(503, 'Permission data is unavailable.');
+  }
+  if (roles.some((role) => role.isBuiltIn !== PERMISSION_ROLE_KEYS.includes(role.roleKey))) {
+    throw new HttpError(503, 'Permission data is inconsistent.');
   }
   return roles;
 }
@@ -194,15 +206,19 @@ async function readPermissionMatrix(database, roleKey, adminId) {
   if (modules.size !== PERMISSION_MODULE_IDS.length) {
     throw new HttpError(503, 'Permission data is unavailable.');
   }
-  return [...modules.values()].map((module) => ({
-    ...module,
-    implementationStatus: module.isAvailable ? 'implemented' : 'planned',
-    isVisible: module.actions.view
-  }));
+  return PERMISSION_MODULE_IDS.map((moduleId) => {
+    const module = modules.get(moduleId);
+    if (!module) throw new HttpError(503, 'Permission data is unavailable.');
+    return {
+      ...module,
+      implementationStatus: module.isAvailable ? 'implemented' : 'planned',
+      isVisible: module.actions.view
+    };
+  });
 }
 
 export async function resolvePermissionsForAdmin(role, adminId, database = pool) {
-  const roleKey = roleKeyFor(role);
+  const roleKey = await roleKeyFor(role, database);
   const modules = await readPermissionMatrix(database, roleKey, adminId);
   return { role, modules };
 }
@@ -215,13 +231,41 @@ export async function resolvePermissionForAdmin(role, adminId, moduleId, actionI
 }
 
 export async function getRolePermissions(roleKey, database = pool) {
-  if (!PERMISSION_ROLE_KEYS.includes(roleKey)) {
-    throw new HttpError(404, 'The role was not found.');
-  }
-  const role = Object.keys(BUILT_IN_ROLES).find((key) => BUILT_IN_ROLES[key] === roleKey);
-  if (!role) throw new HttpError(503, 'Permission data is unavailable.');
+  const [roleRows] = await database.execute(
+    'SELECT role_key, label, description, is_builtin, is_active FROM permission_roles WHERE role_key = ? LIMIT 1',
+    [roleKey]
+  );
+  const roleData = roleRows[0];
+  if (!roleData) throw new HttpError(404, 'The role was not found.');
   const modules = await readPermissionMatrix(database, roleKey, null);
-  return { roleKey, role, modules };
+  return {
+    roleKey,
+    role: roleData.label,
+    label: roleData.label,
+    description: roleData.description,
+    isBuiltIn: Number(roleData.is_builtin) === 1,
+    isActive: Number(roleData.is_active) === 1,
+    modules
+  };
+}
+
+export async function getRoleDetails(roleKey, database = pool) {
+  const [rows] = await database.execute(
+    `SELECT roles.role_key, roles.label, roles.description, roles.is_builtin, roles.is_active,
+            (SELECT COUNT(*) FROM admins WHERE admins.role = roles.label) AS assigned_count
+     FROM permission_roles AS roles WHERE roles.role_key = ? LIMIT 1`,
+    [roleKey]
+  );
+  const role = rows[0];
+  if (!role) throw new HttpError(404, 'The role was not found.');
+  return {
+    roleKey: role.role_key,
+    label: role.label,
+    description: role.description,
+    isBuiltIn: Number(role.is_builtin) === 1,
+    isActive: Number(role.is_active) === 1,
+    assignedCount: Number(role.assigned_count)
+  };
 }
 
 export async function getAccountPermissions(adminId, database = pool) {
@@ -280,47 +324,57 @@ export const updateModuleActivation = withTransaction(
   }
 );
 
+async function validateRolePermissions(database, roleKey, permissions) {
+  const changes = [];
+  for (const permission of permissions) {
+    assertKnownModule(permission.moduleId);
+    for (const [actionId, isAllowed] of Object.entries(permission.actions)) {
+      assertKnownAction(actionId);
+      const [limitRows] = await database.execute(
+        `SELECT max_allowed FROM role_permission_limits
+         WHERE role_key = ? AND module_id = ? AND action_id = ? LIMIT 1`,
+        [roleKey, permission.moduleId, actionId]
+      );
+      if (!limitRows[0]) throw new HttpError(503, 'Permission data is unavailable.');
+      if (isAllowed && Number(limitRows[0].max_allowed) !== 1) {
+        throw new HttpError(403, 'This role cannot be granted that permission.');
+      }
+      changes.push({ moduleId: permission.moduleId, actionId, isAllowed });
+    }
+  }
+  return changes;
+}
+
+async function persistRolePermissions(database, roleKey, changes) {
+  for (const change of changes) {
+    await database.execute(
+      `INSERT INTO role_module_permissions (role_key, module_id, action_id, is_allowed)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE is_allowed = VALUES(is_allowed)`,
+      [roleKey, change.moduleId, change.actionId, change.isAllowed ? 1 : 0]
+    );
+  }
+}
+
+async function getRoleRow(database, roleKey, { forUpdate = false } = {}) {
+  const [rows] = await database.execute(
+    `SELECT role_key, label, description, is_builtin, is_active
+     FROM permission_roles WHERE role_key = ? LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
+    [roleKey]
+  );
+  if (!rows[0]) throw new HttpError(404, 'The role was not found.');
+  return rows[0];
+}
+
 export const updateRolePermissions = withTransaction(
   async (database, actorAdminId, roleKey, permissions) => {
-    if (!PERMISSION_ROLE_KEYS.includes(roleKey)) {
-      throw new HttpError(404, 'The role was not found.');
-    }
-    if (roleKey === BUILT_IN_ROLES['Super Admin']) {
+    const admins = await lockAndVerifySuperAdmin(database, actorAdminId);
+    const role = await getRoleRow(database, roleKey, { forUpdate: true });
+    if (role.role_key === BUILT_IN_ROLES['Super Admin']) {
       throw new HttpError(400, 'Super Admin permissions are fixed to preserve full administrative authority.');
     }
-    await lockAndVerifySuperAdmin(database, actorAdminId);
-    const [roleRows] = await database.execute(
-      'SELECT role_key FROM permission_roles WHERE role_key = ? LIMIT 1 FOR UPDATE',
-      [roleKey]
-    );
-    if (!roleRows[0]) throw new HttpError(404, 'The role was not found.');
-
-    const changes = [];
-    for (const permission of permissions) {
-      assertKnownModule(permission.moduleId);
-      for (const [actionId, isAllowed] of Object.entries(permission.actions)) {
-        assertKnownAction(actionId);
-        const [limitRows] = await database.execute(
-          `SELECT max_allowed FROM role_permission_limits
-           WHERE role_key = ? AND module_id = ? AND action_id = ? LIMIT 1`,
-          [roleKey, permission.moduleId, actionId]
-        );
-        if (!limitRows[0]) throw new HttpError(503, 'Permission data is unavailable.');
-        if (isAllowed && Number(limitRows[0].max_allowed) !== 1) {
-          throw new HttpError(403, 'This role cannot be granted that permission.');
-        }
-        changes.push({ moduleId: permission.moduleId, actionId, isAllowed });
-      }
-    }
-
-    for (const change of changes) {
-      await database.execute(
-        `INSERT INTO role_module_permissions (role_key, module_id, action_id, is_allowed)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE is_allowed = VALUES(is_allowed)`,
-        [roleKey, change.moduleId, change.actionId, change.isAllowed ? 1 : 0]
-      );
-    }
+    const changes = await validateRolePermissions(database, roleKey, permissions);
+    await persistRolePermissions(database, roleKey, changes);
     await writeAudit(database, actorAdminId, null, 'role.permissions.updated', {
       roleKey,
       permissions: changes
@@ -329,12 +383,140 @@ export const updateRolePermissions = withTransaction(
   }
 );
 
+export const createCustomRole = withTransaction(
+  async (database, actorAdminId, input) => {
+    await lockAndVerifySuperAdmin(database, actorAdminId);
+    const [duplicates] = await database.execute(
+      'SELECT role_key FROM permission_roles WHERE role_key = ? OR label = ? LIMIT 1 FOR UPDATE',
+      [input.roleKey, input.label]
+    );
+    if (duplicates.length) throw new HttpError(409, 'A role with that name or identifier already exists.');
+
+    await database.execute(
+      `INSERT INTO permission_roles (role_key, label, description, is_builtin, is_active)
+       VALUES (?, ?, ?, 0, ?)`,
+      [input.roleKey, input.label, input.description, input.isActive ? 1 : 0]
+    );
+    await database.execute(
+      `INSERT INTO role_permission_limits (role_key, module_id, action_id, max_allowed)
+       SELECT ?, module_id, action_id, max_allowed
+       FROM role_permission_limits WHERE role_key = ?`,
+      [input.roleKey, BUILT_IN_ROLES.Admin]
+    );
+    await database.execute(
+      `INSERT INTO role_module_permissions (role_key, module_id, action_id, is_allowed)
+       SELECT ?, module_id, action_id, 0
+       FROM role_permission_limits WHERE role_key = ?`,
+      [input.roleKey, input.roleKey]
+    );
+    const changes = await validateRolePermissions(database, input.roleKey, input.permissions ?? []);
+    await persistRolePermissions(database, input.roleKey, changes);
+    await writeAudit(database, actorAdminId, null, 'role.custom.created', {
+      roleKey: input.roleKey,
+      label: input.label,
+      description: input.description,
+      isActive: input.isActive,
+      permissions: changes
+    });
+    return getRolePermissions(input.roleKey, database);
+  }
+);
+
+export const updateCustomRole = withTransaction(
+  async (database, actorAdminId, roleKey, changes) => {
+    const admins = await lockAndVerifySuperAdmin(database, actorAdminId);
+    const role = await getRoleRow(database, roleKey, { forUpdate: true });
+    if (Number(role.is_builtin) === 1) {
+      throw new HttpError(400, 'Built-in system roles cannot be edited as custom roles.');
+    }
+    const nextLabel = changes.label ?? role.label;
+    const nextDescription = changes.description ?? role.description;
+    const nextIsActive = changes.isActive ?? Number(role.is_active) === 1;
+    const [duplicates] = await database.execute(
+      'SELECT role_key FROM permission_roles WHERE label = ? AND role_key <> ? LIMIT 1 FOR UPDATE',
+      [nextLabel, roleKey]
+    );
+    if (duplicates.length) throw new HttpError(409, 'A role with that name already exists.');
+
+    const [assignedAdmins] = await database.execute(
+      'SELECT id FROM admins WHERE role = ? ORDER BY id FOR UPDATE',
+      [role.label]
+    );
+    await database.execute(
+      'UPDATE permission_roles SET label = ?, description = ?, is_active = ? WHERE role_key = ?',
+      [nextLabel, nextDescription, nextIsActive ? 1 : 0, roleKey]
+    );
+
+    const identityOrStatusChanged = nextLabel !== role.label
+      || nextIsActive !== (Number(role.is_active) === 1);
+    if (identityOrStatusChanged && assignedAdmins.length) {
+      if (nextLabel !== role.label) {
+        await database.execute(
+          'UPDATE admins SET role = ?, auth_version = auth_version + 1 WHERE role = ?',
+          [nextLabel, role.label]
+        );
+      } else {
+        await database.execute(
+          'UPDATE admins SET auth_version = auth_version + 1 WHERE role = ?',
+          [role.label]
+        );
+      }
+      for (const assignedAdmin of assignedAdmins) {
+        await deleteAdminSessions(database, assignedAdmin.id);
+      }
+    }
+
+    let permissionChanges = [];
+    if (changes.permissions) {
+      permissionChanges = await validateRolePermissions(database, roleKey, changes.permissions);
+      await persistRolePermissions(database, roleKey, permissionChanges);
+    }
+    await writeAudit(database, actorAdminId, null, 'role.custom.updated', {
+      roleKey,
+      previousLabel: role.label,
+      label: nextLabel,
+      description: nextDescription,
+      isActive: nextIsActive,
+      permissions: permissionChanges
+    });
+    return getRolePermissions(roleKey, database);
+  }
+);
+
+export const deleteCustomRole = withTransaction(
+  async (database, actorAdminId, roleKey) => {
+    await lockAndVerifySuperAdmin(database, actorAdminId);
+    const role = await getRoleRow(database, roleKey, { forUpdate: true });
+    if (Number(role.is_builtin) === 1) {
+      throw new HttpError(400, 'Built-in system roles cannot be deleted.');
+    }
+    const [assignedAdmins] = await database.execute(
+      'SELECT id FROM admins WHERE role = ? ORDER BY id FOR UPDATE',
+      [role.label]
+    );
+    if (assignedAdmins.length) {
+      throw new HttpError(
+        409,
+        `This role is assigned to ${assignedAdmins.length} administrator account(s). Reassign those accounts in User Management before deleting the role.`
+      );
+    }
+    await writeAudit(database, actorAdminId, null, 'role.custom.deleted', {
+      roleKey,
+      label: role.label
+    });
+    await database.execute('DELETE FROM role_module_permissions WHERE role_key = ?', [roleKey]);
+    await database.execute('DELETE FROM role_permission_limits WHERE role_key = ?', [roleKey]);
+    await database.execute('DELETE FROM permission_roles WHERE role_key = ?', [roleKey]);
+    return { roleKey, deleted: true };
+  }
+);
+
 export const updateAccountPermissionOverrides = withTransaction(
   async (database, actorAdminId, adminId, overrides) => {
     const accounts = await lockAndVerifySuperAdmin(database, actorAdminId);
     const target = accounts.find((row) => String(row.id) === String(adminId));
     if (!target) throw new HttpError(404, 'The administrator account was not found.');
-    if (!BUILT_IN_ROLES[target.role]) throw new HttpError(503, 'Permission data is unavailable.');
+    const roleKey = await roleKeyFor(target.role, database);
     if (target.role === 'Super Admin') {
       throw new HttpError(400, 'Account-specific overrides cannot reduce or alter Super Admin authority.');
     }
@@ -346,7 +528,7 @@ export const updateAccountPermissionOverrides = withTransaction(
       const [limitRows] = await database.execute(
         `SELECT max_allowed FROM role_permission_limits
          WHERE role_key = ? AND module_id = ? AND action_id = ? LIMIT 1`,
-        [BUILT_IN_ROLES[target.role], override.moduleId, override.actionId]
+        [roleKey, override.moduleId, override.actionId]
       );
       if (!limitRows[0]) throw new HttpError(503, 'Permission data is unavailable.');
       if (override.isAllowed === true && Number(limitRows[0].max_allowed) !== 1) {

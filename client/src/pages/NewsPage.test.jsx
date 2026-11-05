@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import App from '../App.jsx';
+import { DEFAULT_PUBLIC_WEBSITE_CONFIGURATION } from '../config/public-site-defaults.js';
 
 const categories = [
   { id: 1, name: 'Startups', slug: 'startups' },
@@ -55,6 +56,9 @@ function installApiMock(newsArticles = articles) {
     if (url.pathname === '/api/categories') {
       return jsonResponse({ data: categories });
     }
+    if (url.pathname === '/api/site-config') {
+      return jsonResponse({ data: DEFAULT_PUBLIC_WEBSITE_CONFIGURATION });
+    }
     if (url.pathname === '/api/news/tn-founders-next') {
       return jsonResponse({ data: articles[0] });
     }
@@ -92,6 +96,7 @@ function installApiMock(newsArticles = articles) {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -101,6 +106,14 @@ describe('public news experience', () => {
     render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
 
     expect((await screen.findAllByRole('heading', { name: articles[0].title })).length).toBeGreaterThan(0);
+    const featuredHero = document.querySelector('.front-page-lead-main');
+    expect(featuredHero.querySelector('.eyebrow')).toBeNull();
+    expect(featuredHero.querySelector('.article-meta')).toBeNull();
+    expect(within(featuredHero).getByRole('heading', { name: articles[0].title })).toBeInTheDocument();
+    expect(within(featuredHero).getByRole('link', { name: /Read the story/ })).toHaveAttribute(
+      'href',
+      `/news/${articles[0].slug}`
+    );
     expect(screen.getByRole('navigation', { name: 'Recent headlines' })).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: articles[1].title }).some((link) =>
       link.getAttribute('href') === `/news/${articles[1].slug}`
@@ -154,6 +167,183 @@ describe('public news experience', () => {
     );
     expect(list.querySelectorAll('.supporting-story')).toHaveLength(10);
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('page=2'), expect.any(Object));
+  });
+
+  it('keeps More Headlines moving while hovered and loops without a gap', async () => {
+    let resize;
+    let frameId = 0;
+    const frames = new Map();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn()
+    })));
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) { resize = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    vi.stubGlobal('requestAnimationFrame', (callback) => {
+      const id = ++frameId;
+      frames.set(id, callback);
+      return id;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id) => frames.delete(id));
+    const tick = (timestamp) => act(() => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(timestamp));
+    });
+
+    installApiMock();
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    const panel = await screen.findByRole('heading', { name: 'More headlines' })
+      .then((heading) => heading.closest('.lead-support'));
+    const list = panel.querySelector('.lead-support-list');
+    const styles = await import('../styles.css?raw');
+    expect(styles.default).toMatch(/\.lead-support-list\s*\{[^}]*scroll-behavior:\s*auto/s);
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 100 });
+    Object.defineProperty(list.firstElementChild, 'offsetHeight', { configurable: true, value: 300 });
+    let fractionalScrollPosition = 0;
+    Object.defineProperty(list, 'scrollTop', {
+      configurable: true,
+      get: () => Math.round(fractionalScrollPosition / 1.6) * 1.6,
+      set: (value) => { fractionalScrollPosition = value; }
+    });
+    act(() => resize());
+    expect(list.querySelectorAll('.lead-support-sequence')).toHaveLength(2);
+
+    tick(1000);
+    for (let timestamp = 1016; timestamp <= 1320; timestamp += 16) tick(timestamp);
+    expect(list.scrollTop).toBeGreaterThan(0);
+
+    fireEvent.mouseEnter(panel);
+    const hoveredAt = list.scrollTop;
+    tick(2320);
+    expect(list.scrollTop).toBeGreaterThan(hoveredAt);
+    fireEvent.mouseMove(panel);
+    const afterMouseMove = list.scrollTop;
+    tick(3320);
+    expect(list.scrollTop).toBeGreaterThan(afterMouseMove);
+
+    tick(20000);
+    expect(list.scrollTop).toBeGreaterThanOrEqual(0);
+    expect(list.scrollTop).toBeLessThan(300);
+    tick(127000);
+    expect(list.scrollTop).toBeGreaterThanOrEqual(0);
+    expect(list.scrollTop).toBeLessThan(300);
+  });
+
+  it('lets native wheel scrolling take control and resumes from that position after three idle seconds', async () => {
+    let resize;
+    let frameId = 0;
+    const frames = new Map();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn()
+    })));
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) { resize = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    vi.stubGlobal('requestAnimationFrame', (callback) => {
+      const id = ++frameId;
+      frames.set(id, callback);
+      return id;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id) => frames.delete(id));
+    const tick = (timestamp) => act(() => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(timestamp));
+    });
+
+    installApiMock();
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    const list = await screen.findByRole('region', { name: 'More headlines list' });
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 100 });
+    Object.defineProperty(list.firstElementChild, 'offsetHeight', { configurable: true, value: 300 });
+    act(() => resize());
+    tick(1000);
+    tick(2000);
+
+    let resume;
+    const originalSetTimeout = window.setTimeout.bind(window);
+    vi.spyOn(window, 'setTimeout').mockImplementation((callback, delay) => {
+      if (delay === 3000) {
+        resume = callback;
+        return 123456;
+      }
+      return originalSetTimeout(callback, delay);
+    });
+    const wheel = new WheelEvent('wheel', { deltaY: 40, bubbles: true, cancelable: true });
+    list.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(false);
+    list.scrollTop = 80;
+    const manualPosition = list.scrollTop;
+    tick(2500);
+    expect(list.scrollTop).toBe(manualPosition);
+    act(() => resume());
+    tick(4000);
+    expect(list.scrollTop).toBe(manualPosition);
+    tick(5000);
+    expect(list.scrollTop).toBeGreaterThan(manualPosition);
+
+    list.dispatchEvent(new Event('touchstart', { bubbles: true, cancelable: true }));
+    list.dispatchEvent(new Event('touchmove', { bubbles: true, cancelable: true }));
+    list.scrollTop = 140;
+    const swipePosition = list.scrollTop;
+    tick(6000);
+    expect(list.scrollTop).toBe(swipePosition);
+    act(() => resume());
+    tick(7000);
+    expect(list.scrollTop).toBe(swipePosition);
+    tick(8000);
+    expect(list.scrollTop).toBeGreaterThan(swipePosition);
+  });
+
+  it('does not auto-scroll or duplicate headlines when reduced motion is preferred', async () => {
+    let resize;
+    const frames = new Map();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn()
+    })));
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback) { resize = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    let frameId = 0;
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback) => {
+      frameId += 1;
+      frames.set(frameId, callback);
+      return frameId;
+    }));
+    vi.stubGlobal('cancelAnimationFrame', (id) => frames.delete(id));
+
+    installApiMock();
+    render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+    const panel = await screen.findByRole('heading', { name: 'More headlines' })
+      .then((heading) => heading.closest('.lead-support'));
+    const list = panel.querySelector('.lead-support-list');
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: 100 });
+    Object.defineProperty(list.firstElementChild, 'offsetHeight', { configurable: true, value: 300 });
+    act(() => resize());
+
+    expect(list.querySelectorAll('.lead-support-sequence')).toHaveLength(1);
+    const initialScrollTop = list.scrollTop;
+    act(() => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(1000));
+    });
+    expect(list.scrollTop).toBe(initialScrollTop);
+    list.scrollTop = 40;
+    expect(list.scrollTop).toBe(40);
   });
 
   it('keeps the latest ticker and More Headlines empty state when no stories are published', async () => {
@@ -211,7 +401,19 @@ describe('public news experience', () => {
 
   it('shows loading skeletons while news are pending', async () => {
     let resolveRequest;
-    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveRequest = resolve; })));
+    vi.stubGlobal('fetch', vi.fn((input) => {
+      const url = new URL(String(input), 'http://localhost');
+      if (url.pathname === '/api/site-config') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: DEFAULT_PUBLIC_WEBSITE_CONFIGURATION })
+        });
+      }
+      if (url.pathname === '/api/categories') {
+        return Promise.resolve({ ok: true, json: async () => ({ data: categories }) });
+      }
+      return new Promise((resolve) => { resolveRequest = resolve; });
+    }));
     render(<MemoryRouter initialEntries={['/news/']}><App /></MemoryRouter>);
 
     expect(screen.getByLabelText('Loading news')).toBeInTheDocument();

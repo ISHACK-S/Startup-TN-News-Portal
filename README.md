@@ -169,7 +169,7 @@ Any actual role or active-status change increments the account's authorization v
 
 ## Permission foundation
 
-Migration `002_admin_permissions.sql` adds the permission registry and permission data while preserving the existing `admins` accounts, articles, categories, and sessions. Migration `003_enable_role_builder.sql` marks the now-implemented Role Builder module available and active; its Admin role limit remains denied, and Super Admin retains its built-in access. Migration `004_content_management.sql` adds the media asset registry, Web Stories and slides, hero slides, video records, and enables the four implemented content/media modules. The runner applies and verifies migrations `001_admin_authorization` through `004_content_management` in order. **Do not run it against a live database until an operator has verified the target, taken a backup, and scheduled the rollout.** It is never run automatically on application startup.
+Migration `002_admin_permissions.sql` adds the permission registry and permission data while preserving the existing `admins` accounts, articles, categories, and sessions. Migration `003_enable_role_builder.sql` marks the now-implemented Role Builder module available and active; its Admin role limit remains denied, and Super Admin retains its built-in access. Migration `004_content_management.sql` adds media, Web Stories, hero slides, and video records. Migrations `005` and `006` add website configuration and draft storage. Migration `007_startuptn_module_catalog.sql` removes obsolete module permission rows and module records, preserving roles, accounts, and permissions for retained modules. The runner applies and verifies migrations `001` through `007` in order. **Do not run it against a live database until an operator has verified the target, taken a backup, and scheduled the rollout.** It is never run automatically on application startup.
 
 For a safe rollout, first back up the target MySQL database and confirm the server's configured database and TLS connection without exposing credentials. Apply the migration from a trusted environment only after checking that the target is correct:
 
@@ -183,14 +183,13 @@ The registry uses these stable identifiers (not display labels) and marks implem
 
 | Group | Module identifiers |
 |---|---|
-| Core dashboard | `overview`, `news-articles`, `profile-settings` |
-| Public-service management | `monthly-reports`, `citizen-services`, `faq-management`, `police-stations`, `helplines-registry`, `portal-links` |
-| Content and media | `web-stories`, `hero-slider`, `video-media`, `media-library`, `official-alerts` |
-| Access and account administration | `access-control`, `user-management`, `role-builder`, `session-management`, `security-events`, `audit-logs` |
-| Website configuration | `branding-theme-editor`, `menu-management`, `footer-management`, `seo-management` |
-| System administration | `system-configuration`, `backup-restore`, `api-key-configuration`, `smtp-configuration` |
+| Dashboard | `overview` |
+| Content Management | `news-articles`, `web-stories`, `hero-slider` |
+| Media Management | `video-media`, `media-library` |
+| Administration | `user-management`, `role-builder`, `access-control` |
+| Website Management | `branding-theme-editor`, `menu-management`, `footer-management`, `seo-management` |
 
-`overview`, `news-articles`, `access-control`, `user-management`, `role-builder`, `media-library`, `web-stories`, `hero-slider`, and `video-media` are marked implemented after their corresponding migrations are applied; other modules remain registered but unavailable and inactive. The supported actions are `view`, `create`, `edit`, `publish`, `delete`, `manage`, and `configure`.
+SEO Management remains registered as a planned website feature. `overview`, `news-articles`, `access-control`, `user-management`, `role-builder`, `media-library`, `web-stories`, `hero-slider`, and `video-media` are marked implemented after their corresponding migrations are applied; other planned modules remain unavailable and inactive. The supported actions are `view`, `create`, `edit`, `publish`, `delete`, `manage`, and `configure`.
 
 Effective authorization requires a grant within the role's maximum, an available and active module, and the requested action. Module visibility is derived from effective `view` permission; visibility does not grant other actions. The built-in Admin defaults preserve Overview and the existing article workflow, with other modules denied unless explicitly granted within Admin's limits. Built-in Super Admin grants remain fixed and unrestricted across available modules. Account overrides replace the corresponding role grant but cannot exceed the role limit; Super Admin overrides are prohibited. Missing or inconsistent permission records fail closed. Protected requests re-read current permissions from MySQL, so role and module changes take effect on the next request; account override changes also increment that account's authorization version and invalidate its sessions.
 
@@ -237,7 +236,7 @@ Content-Type: application/json
 
 Successful responses wrap the result in `data`. Module entries include `moduleId`, `label`, `description`, `navigationGroup`, `isAvailable`, `isActive`, and `implementationStatus`. Effective permission entries additionally include `roleActions`, `limits`, nullable `overrides`, `actions`, and `isVisible`. Role Builder and Account Permissions use these APIs; the built-in Super Admin grants remain fixed, Admin cannot grant beyond server-defined limits, and account overrides cannot change the built-in Super Admin. The APIs do not create modules, accounts, custom roles, or future module APIs. Remaining registered modules and their UIs are future work; they are not made functional by appearing in the registry.
 
-The admin shell obtains permissions from `/me`; navigation and direct-route guards use the returned effective actions. Server middleware remains authoritative for API calls. The Role Builder is at `/admin/role-builder`, and account-specific permissions are at `/admin/access-control/permissions`; the existing account role/status interface remains at `/admin/access-control/users`. The navigation displays only currently authorized modules with implemented routes. Planned modules are not linked to placeholder screens. Profile Settings is currently unavailable and shown as disabled until that module is implemented. Dashboard article counts and recent articles are shown only when the account has article-view access; no user counts or synthetic system activity are presented.
+The admin shell obtains permissions from `/me`; navigation and direct-route guards use the returned effective actions. Server middleware remains authoritative for API calls. The Role Builder is at `/admin/role-builder`, account-specific permissions are at `/admin/access-control/permissions`, and the account role/status interface is at `/admin/access-control/users`. Profile Settings is available at `/admin/profile` to both Admin and Super Admin. Website configuration editors are restricted to Super Admin. The navigation displays only currently authorized modules with implemented routes; planned modules are not linked to placeholder screens. Dashboard article counts and recent articles are shown only when the account has article-view access; no user counts or synthetic system activity are presented.
 
 ## Cloudinary uploads
 
@@ -256,6 +255,10 @@ The Hero Slider admin routes under `/api/admin/hero-slides` support listing, cre
 Video admin routes under `/api/admin/videos` support list, create, update/reordering, publication, and delete with `video-media` action permissions. Source URLs are validated server-side against HTTPS YouTube and Vimeo URL forms; arbitrary iframe HTML and embed URLs are not accepted. The API derives canonical YouTube privacy-enhanced or Vimeo embed URLs. Public `GET /api/videos` returns published records only; the public listing is at `/videos`. Embeds are lazy and require an explicit user action when a poster image is available.
 
 For all four modules, unauthenticated admin requests return `401`; missing module/action permission returns `403`. Super Admin receives the built-in maximum permissions. Admin accounts start denied for these modules and may only be granted actions within their configured role limits. Publishing, deleting, and other writes are checked by the server, not by navigation visibility.
+
+## Public website configuration
+
+The Super Admin-only editors at `/admin/menu-management`, `/admin/footer-management`, and `/admin/branding` manage draft and published public-site settings. Public pages load only published configuration from `GET /api/site-config`; menu/footer updates therefore affect the actual public header and footer only after publishing. Branding colours, typography, and identity are scoped to the public-site wrapper, not the admin dashboard. Before enabling these editors on an existing database, back it up and manually run `npm run migrate-admin-authorization`; migrations `005_website_configuration.sql` and `006_website_configuration_drafts.sql` create the live and draft configuration tables without dropping data and activate only the three configuration modules. The migration runner uses the ledger and advisory lock, verifies the tables and module records, and is safe to rerun after partial MySQL DDL. It is not run automatically during startup. Until a section is published, the service returns defaults matching the existing public content.
 
 ## Backend deployment (manual)
 

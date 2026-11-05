@@ -1,0 +1,21 @@
+{
+  "language": "Language",
+  "Switch language to Tamil": "Switch language to Tamil",
+  "Switch language to English": "Switch language to English",
+  "english": "English",
+  "tamil": "தமிழ்",
+  "loading": "Loading…",
+  "retry": "Try again",
+  "save": "Save",
+  "cancel": "Cancel",
+  "close": "Close",
+  "search": "Search",
+  "previous": "Previous",
+  "next": "Next",
+  "page": "Page",
+  "of": "of",
+  "success": "Success",
+  "failure": "Failure",
+  "actions": "Actions",
+  "status": "Status"
+}

@@ -26,24 +26,28 @@ let resolvePermissionsForAdmin;
 let resolvePermissionForAdmin;
 let updateModuleActivation;
 let updateRolePermissions;
+let createCustomRole;
+let updateCustomRole;
+let deleteCustomRole;
+let getRoleDetails;
 let updateAccountPermissionOverrides;
 let removeAccountPermissionOverride;
 let adminPermissionsRouter;
+let adminAccessControlRouter;
 
 const protectedModules = new Set([
-  'access-control', 'user-management', 'role-builder', 'session-management',
-  'security-events', 'audit-logs', 'branding-theme-editor', 'menu-management',
-  'footer-management', 'seo-management', 'system-configuration', 'backup-restore',
-  'api-key-configuration', 'smtp-configuration'
+  'access-control', 'user-management', 'role-builder', 'branding-theme-editor',
+  'menu-management', 'footer-management', 'seo-management'
 ]);
 
 before(async () => {
-  const [expressModule, middleware, errorModule, permissionService, permissionsRouter] = await Promise.all([
+  const [expressModule, middleware, errorModule, permissionService, permissionsRouter, accessRouter] = await Promise.all([
     import('express'),
     import('../src/middleware/require-admin.js'),
     import('../src/middleware/error-handler.js'),
     import('../src/services/permissions.service.js'),
-    import('../src/routes/admin-permissions.routes.js')
+    import('../src/routes/admin-permissions.routes.js'),
+    import('../src/routes/admin-access-control.routes.js')
   ]);
   express = expressModule.default;
   ({ requirePermission } = middleware);
@@ -55,10 +59,15 @@ before(async () => {
     resolvePermissionForAdmin,
     updateModuleActivation,
     updateRolePermissions,
+    createCustomRole,
+    updateCustomRole,
+    deleteCustomRole,
+    getRoleDetails,
     updateAccountPermissionOverrides,
     removeAccountPermissionOverride
   } = permissionService);
   ({ adminPermissionsRouter } = permissionsRouter);
+  ({ adminAccessControlRouter } = accessRouter);
 });
 
 function createPermissionDatabase() {
@@ -81,9 +90,14 @@ function createPermissionDatabase() {
     audits: [],
     sessionsInvalidated: [],
     roleRows: new Set(PERMISSION_ROLE_KEYS),
+    roles: new Map([
+      ['admin', { role_key: 'admin', label: 'Admin', description: '', is_builtin: 1, is_active: 1 }],
+      ['super-admin', { role_key: 'super-admin', label: 'Super Admin', description: '', is_builtin: 1, is_active: 1 }]
+    ]),
     failPermissionRead: false
   };
-  const roleKey = (role) => BUILT_IN_ROLES[role];
+  const roleKey = (role) => BUILT_IN_ROLES[role]
+    ?? [...state.roles.values()].find((item) => item.label === role)?.role_key;
   const permissionsFor = (role, moduleId, actionId) => (
     role === 'Super Admin'
     || (moduleId === 'overview' && actionId === 'view')
@@ -102,7 +116,8 @@ function createPermissionDatabase() {
       }
       if (sql.startsWith('SELECT modules.module_id')) {
         const [matrixRoleKey, , adminId] = values;
-        const role = Object.keys(BUILT_IN_ROLES).find((candidate) => roleKey(candidate) === matrixRoleKey);
+        const role = state.roles.get(matrixRoleKey)?.label;
+        const isBuiltInRole = Boolean(state.roles.get(matrixRoleKey)?.is_builtin);
         const accountOverrides = [...state.overrides.entries()]
           .filter(([key]) => key.startsWith(`${adminId}:`));
         const overrideMap = new Map(accountOverrides.map(([key, isAllowed]) => [
@@ -114,9 +129,11 @@ function createPermissionDatabase() {
           return {
             ...module,
             action_id: actionId,
-            max_allowed: limitFor(matrixRoleKey, module.module_id, actionId) ? 1 : 0,
+            max_allowed: (matrixRoleKey === 'super-admin'
+              || (isBuiltInRole && limitFor(matrixRoleKey, module.module_id, actionId))
+              || (!isBuiltInRole && !protectedModules.has(module.module_id) && actionId !== 'configure')) ? 1 : 0,
             is_allowed: (state.rolePermissions.get(`${matrixRoleKey}:${module.module_id}:${actionId}`)
-              ?? permissionsFor(role, module.module_id, actionId)) ? 1 : 0,
+              ?? (isBuiltInRole && permissionsFor(role, module.module_id, actionId))) ? 1 : 0,
             override_allowed: overrideMap.has(permissionKey)
               ? (overrideMap.get(permissionKey) ? 1 : 0)
               : null
@@ -126,12 +143,39 @@ function createPermissionDatabase() {
       if (sql.startsWith('SELECT module_id, label, description, navigation_group')) {
         return [[...state.modules.values()]];
       }
-      if (sql.startsWith('SELECT role_key, label, is_builtin FROM permission_roles')) {
-        return [[...state.roleRows].map((role_key) => ({
-          role_key,
-          label: role_key === 'admin' ? 'Admin' : 'Super Admin',
-          is_builtin: 1
+      if (sql.startsWith('SELECT roles.role_key, roles.label')) {
+        if (sql.includes('WHERE roles.role_key = ?')) {
+          const role = state.roles.get(values[0]);
+          return [[role ? {
+            ...role,
+            assigned_count: state.admins.filter((admin) => admin.role === role.label).length
+          } : undefined].filter(Boolean)];
+        }
+        return [[...state.roles.values()].map((role) => ({
+          ...role,
+          assigned_count: state.admins.filter((admin) => admin.role === role.label).length
         }))];
+      }
+      if (sql.startsWith('SELECT role_key, label, description, is_builtin, is_active')) {
+        const role = state.roles.get(values[0]);
+        return [[role ? { ...role } : undefined].filter(Boolean)];
+      }
+      if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+        const role = [...state.roles.values()].find((item) => item.label === values[0]);
+        return [[role ? { role_key: role.role_key, is_active: role.is_active } : undefined].filter(Boolean)];
+      }
+      if (sql.startsWith('SELECT role_key FROM permission_roles WHERE role_key = ? OR label = ?')) {
+        return [[...state.roles.values()]
+          .filter((role) => role.role_key === values[0] || role.label === values[1])
+          .map(({ role_key }) => ({ role_key }))];
+      }
+      if (sql.startsWith('SELECT role_key FROM permission_roles WHERE label = ? AND role_key <> ?')) {
+        return [[...state.roles.values()]
+          .filter((role) => role.label === values[0] && role.role_key !== values[1])
+          .map(({ role_key }) => ({ role_key }))];
+      }
+      if (sql.startsWith('SELECT id FROM admins WHERE role = ? ORDER BY id')) {
+        return [[...state.admins.filter((admin) => admin.role === values[0]).map(({ id }) => ({ id }))]];
       }
       if (sql.startsWith('SELECT id, role, is_active FROM admins ORDER BY id FOR UPDATE')) {
         return [[...state.admins.map((admin) => ({ ...admin }))]];
@@ -148,7 +192,7 @@ function createPermissionDatabase() {
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
       }
       if (sql.startsWith('SELECT role_key FROM permission_roles')) {
-        return [[state.roleRows.has(values[0]) ? { role_key: values[0] } : undefined].filter(Boolean)];
+        return [[state.roles.has(values[0]) ? { role_key: values[0] } : undefined].filter(Boolean)];
       }
       if (sql.startsWith('SELECT module_id, is_available, is_active')) {
         const module = state.modules.get(values[0]);
@@ -174,8 +218,59 @@ function createPermissionDatabase() {
         return [{ affectedRows: 1 }];
       }
       if (sql.startsWith('INSERT INTO role_module_permissions')) {
+        if (sql.includes('SELECT ?, module_id, action_id, 0')) {
+          const roleKeyValue = values[0];
+          for (const module of state.modules.values()) {
+            for (const actionId of PERMISSION_ACTIONS) {
+              state.rolePermissions.set(`${roleKeyValue}:${module.module_id}:${actionId}`, false);
+            }
+          }
+          return [{ affectedRows: PERMISSION_MODULES.length * PERMISSION_ACTIONS.length }];
+        }
         const [role, moduleId, actionId, isAllowed] = values;
         state.rolePermissions.set(`${role}:${moduleId}:${actionId}`, Boolean(isAllowed));
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('INSERT INTO permission_roles')) {
+        const [role_key, label, description, is_active] = values;
+        state.roles.set(role_key, {
+          role_key, label, description, is_builtin: 0, is_active
+        });
+        state.roleRows.add(role_key);
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('INSERT INTO role_permission_limits')) {
+        return [{ affectedRows: PERMISSION_MODULES.length * PERMISSION_ACTIONS.length }];
+      }
+      if (sql.startsWith('UPDATE permission_roles SET label = ?, description = ?, is_active = ?')) {
+        const [label, description, is_active, role_key] = values;
+        Object.assign(state.roles.get(role_key), { label, description, is_active });
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('UPDATE admins SET role = ?, auth_version = auth_version + 1 WHERE role = ?')) {
+        const [newRole, oldRole] = values;
+        for (const admin of state.admins.filter((item) => item.role === oldRole)) {
+          admin.role = newRole;
+          admin.auth_version += 1;
+        }
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('UPDATE admins SET auth_version = auth_version + 1 WHERE role = ?')) {
+        for (const admin of state.admins.filter((item) => item.role === values[0])) admin.auth_version += 1;
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('DELETE FROM role_module_permissions WHERE role_key = ?')) {
+        for (const key of state.rolePermissions.keys()) {
+          if (key.startsWith(`${values[0]}:`)) state.rolePermissions.delete(key);
+        }
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('DELETE FROM role_permission_limits WHERE role_key = ?')) {
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.startsWith('DELETE FROM permission_roles WHERE role_key = ?')) {
+        state.roles.delete(values[0]);
+        state.roleRows.delete(values[0]);
         return [{ affectedRows: 1 }];
       }
       if (sql.startsWith('INSERT INTO account_permission_overrides')) {
@@ -212,6 +307,8 @@ function createPermissionDatabase() {
       state.transactionSnapshot = {
         modules: structuredClone([...state.modules]),
         rolePermissions: structuredClone([...state.rolePermissions]),
+        roles: structuredClone([...state.roles]),
+        roleRows: structuredClone([...state.roleRows]),
         overrides: structuredClone([...state.overrides]),
         admins: structuredClone(state.admins),
         audits: structuredClone(state.audits),
@@ -226,6 +323,8 @@ function createPermissionDatabase() {
       if (!snapshot) return;
       state.modules = new Map(snapshot.modules);
       state.rolePermissions = new Map(snapshot.rolePermissions);
+      state.roles = new Map(snapshot.roles);
+      state.roleRows = new Set(snapshot.roleRows);
       state.overrides = new Map(snapshot.overrides);
       state.admins = snapshot.admins;
       state.audits = snapshot.audits;
@@ -253,9 +352,11 @@ function createPermissionApp(database, sessionAdminId) {
     next();
   });
   app.get('/news', requirePermission('news-articles', 'view'), (req, res) => res.sendStatus(204));
-  app.get('/faq', requirePermission('faq-management', 'view'), (req, res) => res.sendStatus(204));
+  app.get('/stories', requirePermission('web-stories', 'view'), (req, res) => res.sendStatus(204));
   app.get('/planned', requirePermission('web-stories', 'view'), (req, res) => res.sendStatus(204));
   app.use('/access', adminPermissionsRouter);
+  app.use('/api/admin/access-control', adminAccessControlRouter);
+  app.use('/api/admin/access-control/permissions', adminPermissionsRouter);
   app.use(errorHandler);
   return app;
 }
@@ -264,8 +365,19 @@ describe('database-backed permission foundation', () => {
   it('registers every required module with stable identifiers and activation/availability state', async () => {
     const { database } = createPermissionDatabase();
     const modules = await listPermissionModules(database);
-    assert.equal(modules.length, 28);
+    assert.deepEqual(PERMISSION_MODULES.map(({ id }) => id), [
+      'overview', 'news-articles', 'web-stories', 'hero-slider',
+      'video-media', 'media-library', 'user-management', 'role-builder',
+      'access-control', 'branding-theme-editor', 'menu-management',
+      'footer-management', 'seo-management'
+    ]);
+    assert.equal(modules.length, 13);
+    assert.deepEqual(modules.map((module) => module.moduleId), PERMISSION_MODULES.map(({ id }) => id));
     assert.deepEqual(new Set(modules.map((module) => module.moduleId)), new Set(PERMISSION_MODULES.map(({ id }) => id)));
+    assert.deepEqual(new Set(modules.map((module) => module.navigationGroup)), new Set([
+      'Dashboard', 'Content Management', 'Media Management', 'Administration', 'Website Management'
+    ]));
+    assert.equal(modules.some((module) => /citizen|police|helpline|monthly report|portal link|faq/i.test(module.label)), false);
     assert.equal(modules.find((module) => module.moduleId === 'news-articles').implementationStatus, 'implemented');
     assert.equal(modules.find((module) => module.moduleId === 'role-builder').implementationStatus, 'implemented');
     assert.equal(modules.find((module) => module.moduleId === 'web-stories').implementationStatus, 'planned');
@@ -276,9 +388,10 @@ describe('database-backed permission foundation', () => {
     const { database } = createPermissionDatabase();
     const admin = await resolvePermissionsForAdmin('Admin', 2, database);
     const superAdmin = await resolvePermissionsForAdmin('Super Admin', 1, database);
+    assert.deepEqual(admin.modules.map((module) => module.moduleId), PERMISSION_MODULES.map(({ id }) => id));
     const article = admin.modules.find((module) => module.moduleId === 'news-articles');
-    const future = admin.modules.find((module) => module.moduleId === 'monthly-reports');
-    const superFuture = superAdmin.modules.find((module) => module.moduleId === 'monthly-reports');
+    const future = admin.modules.find((module) => module.moduleId === 'seo-management');
+    const superFuture = superAdmin.modules.find((module) => module.moduleId === 'seo-management');
 
     assert.deepEqual(article.actions, {
       view: true, create: true, edit: true, publish: true, delete: true, manage: true, configure: false
@@ -309,6 +422,135 @@ describe('database-backed permission foundation', () => {
     assert.equal((await request(createPermissionApp(database)).get('/access/me')).status, 401);
   });
 
+  it('creates custom roles with database-backed permissions, rejects duplicates, and prevents escalation', async () => {
+    const { database, state } = createPermissionDatabase();
+    const app = createPermissionApp(database, 1);
+    const payload = {
+      roleKey: 'copy-editor',
+      label: 'Copy Editor',
+      description: 'Edits newsroom copy.',
+      isActive: true,
+      permissions: [{ moduleId: 'news-articles', actions: { view: true, edit: true } }]
+    };
+
+    const created = await request(app)
+      .post('/api/admin/access-control/permissions/roles')
+      .send(payload);
+    assert.equal(created.status, 201);
+    assert.equal(created.body.data.roleKey, 'copy-editor');
+    assert.equal(created.body.data.modules.find((module) => module.moduleId === 'news-articles').actions.edit, true);
+    assert.equal(created.body.data.modules.find((module) => module.moduleId === 'news-articles').actions.delete, false);
+    assert.equal(state.roles.get('copy-editor').is_builtin, 0);
+    assert.equal(state.audits[0].operation, 'role.custom.created');
+
+    const duplicate = await request(app)
+      .post('/api/admin/access-control/permissions/roles')
+      .send({ ...payload, roleKey: 'copy-editor-2' });
+    assert.equal(duplicate.status, 409);
+
+    const deniedGrant = await request(app)
+      .post('/api/admin/access-control/permissions/roles')
+      .send({
+        ...payload,
+        roleKey: 'access-manager',
+        label: 'Access Manager',
+        permissions: [{ moduleId: 'access-control', actions: { manage: true } }]
+      });
+    assert.equal(deniedGrant.status, 403);
+    assert.equal(state.roles.has('access-manager'), false);
+
+    const adminCreate = await request(createPermissionApp(database, 2))
+      .post('/api/admin/access-control/permissions/roles')
+      .send(payload);
+    assert.equal(adminCreate.status, 403);
+  });
+
+  it('loads and updates custom-role details, invalidates assigned sessions, and blocks assigned or built-in deletion', async () => {
+    const { database, state } = createPermissionDatabase();
+    await createCustomRole(database, 1, {
+      roleKey: 'web-editor',
+      label: 'Web Editor',
+      description: 'Manages newsroom content.',
+      isActive: true,
+      permissions: [{ moduleId: 'news-articles', actions: { view: true } }]
+    });
+    const details = await getRoleDetails('web-editor', database);
+    assert.equal(details.description, 'Manages newsroom content.');
+    assert.equal(details.assignedCount, 0);
+
+    state.admins[1].role = 'Web Editor';
+    const updated = await updateCustomRole(database, 1, 'web-editor', {
+      label: 'Senior Web Editor',
+      isActive: false
+    });
+    assert.equal(updated.label, 'Senior Web Editor');
+    assert.equal(state.admins[1].role, 'Senior Web Editor');
+    assert.equal(state.admins[1].auth_version, 1);
+    assert.deepEqual(state.sessionsInvalidated, ['2']);
+
+    await assert.rejects(deleteCustomRole(database, 1, 'web-editor'), /Reassign those accounts in User Management/);
+    await assert.rejects(deleteCustomRole(database, 1, 'admin'), /Built-in system roles cannot be deleted/);
+    state.admins[1].role = 'Admin';
+    assert.deepEqual(await deleteCustomRole(database, 1, 'web-editor'), {
+      roleKey: 'web-editor',
+      deleted: true
+    });
+    assert.equal(state.roles.has('web-editor'), false);
+  });
+
+  it('rejects custom-role mutations from non-Super Admins and invalid custom role inputs', async () => {
+    const { database } = createPermissionDatabase();
+    const app = createPermissionApp(database, 2);
+    assert.equal((await request(app).post('/api/admin/access-control/permissions/roles').send({
+      roleKey: 'reviewer',
+      label: 'Reviewer'
+    })).status, 403);
+
+    const superAdminApp = createPermissionApp(database, 1);
+    assert.equal((await request(superAdminApp).post('/api/admin/access-control/permissions/roles').send({
+      roleKey: 'not valid',
+      label: 'Reviewer'
+    })).status, 400);
+  });
+
+  it('allows Admin current-user permission loading through real mounted routers while preserving Super Admin guards', async () => {
+    const { database, state } = createPermissionDatabase();
+    state.overrides.set('2:overview:create', true);
+    const adminApp = createPermissionApp(database, 2);
+
+    const currentPermissions = await request(adminApp)
+      .get('/api/admin/access-control/permissions/me');
+    assert.equal(currentPermissions.status, 200);
+    assert.equal(currentPermissions.body.data.role, 'Admin');
+    assert.equal(
+      currentPermissions.body.data.modules.find((module) => module.moduleId === 'overview').actions.create,
+      true
+    );
+
+    assert.equal(
+      (await request(adminApp).get('/api/admin/access-control/users')).status,
+      403
+    );
+    assert.equal(
+      (await request(adminApp).get('/api/admin/access-control/permissions/roles')).status,
+      403
+    );
+
+    const superAdminApp = createPermissionApp(database, 1);
+    assert.equal(
+      (await request(superAdminApp).get('/api/admin/access-control/permissions/me')).status,
+      200
+    );
+    assert.equal(
+      (await request(superAdminApp).get('/api/admin/access-control/permissions/roles')).status,
+      200
+    );
+    assert.equal(
+      (await request(createPermissionApp(database)).get('/api/admin/access-control/permissions/me')).status,
+      401
+    );
+  });
+
   it('requires authentication, distinguishes 403, and immediately enforces current permissions', async () => {
     const { database } = createPermissionDatabase();
     const unauthenticated = createPermissionApp(database, undefined);
@@ -335,18 +577,18 @@ describe('database-backed permission foundation', () => {
       actionId: 'publish',
       isAllowed: false
     }]);
-    assert.equal(result.modules.find((module) => module.moduleId === 'monthly-reports').actions.view, false);
+    assert.equal(result.modules.find((module) => module.moduleId === 'web-stories').actions.view, false);
     assert.equal(result.modules.find((module) => module.moduleId === 'news-articles').actions.publish, false);
     assert.deepEqual(state.sessionsInvalidated, ['2']);
     assert.equal(state.admins[1].auth_version, 1);
     assert.equal(state.audits[0].operation, 'account.permission-overrides.updated');
     await assert.rejects(
       updateAccountPermissionOverrides(database, 1, 2, [{
-        moduleId: 'system-configuration',
+        moduleId: 'citizen-services',
         actionId: 'configure',
         isAllowed: true
       }]),
-      /cannot be granted/
+      /not supported/
     );
     await removeAccountPermissionOverride(database, 1, 2, 'news-articles', 'publish');
     assert.equal(state.overrides.size, 0);
@@ -357,10 +599,10 @@ describe('database-backed permission foundation', () => {
     const { database } = createPermissionDatabase();
     await assert.rejects(
       updateRolePermissions(database, 1, 'admin', [{
-        moduleId: 'system-configuration',
+        moduleId: 'citizen-services',
         actions: { configure: true }
       }]),
-      /cannot be granted/
+      /not supported/
     );
     await assert.rejects(
       updateRolePermissions(database, 1, 'super-admin', [{
@@ -416,7 +658,7 @@ describe('database-backed permission foundation', () => {
     const app = createPermissionApp(database, 1);
     const modules = await request(app).get('/access/modules');
     assert.equal(modules.status, 200);
-    assert.equal(modules.body.data.length, 28);
+    assert.equal(modules.body.data.length, 13);
 
     const rolePermissions = await request(app).get('/access/roles/admin/permissions');
     assert.equal(rolePermissions.status, 200);
@@ -442,15 +684,15 @@ describe('database-backed permission foundation', () => {
     assert.equal(update.body.data.modules.find((module) => module.moduleId === 'news-articles').actions.delete, false);
 
     const override = await request(app).put('/access/accounts/2/overrides').send({
-      overrides: [{ moduleId: 'monthly-reports', actionId: 'view', isAllowed: true }]
+      overrides: [{ moduleId: 'web-stories', actionId: 'view', isAllowed: true }]
     });
     assert.equal(override.status, 200);
     const reset = await request(app).put('/access/accounts/2/overrides').send({
-      overrides: [{ moduleId: 'monthly-reports', actionId: 'view', isAllowed: null }]
+      overrides: [{ moduleId: 'web-stories', actionId: 'view', isAllowed: null }]
     });
     assert.equal(reset.status, 200);
-    assert.equal(reset.body.data.modules.find((module) => module.moduleId === 'monthly-reports').overrides.view, null);
-    const removed = await request(app).delete('/access/accounts/2/overrides/monthly-reports/view');
+    assert.equal(reset.body.data.modules.find((module) => module.moduleId === 'web-stories').overrides.view, null);
+    const removed = await request(app).delete('/access/accounts/2/overrides/web-stories/view');
     assert.equal(removed.status, 200);
 
     const invalid = await request(app).patch('/access/roles/admin/permissions').send({

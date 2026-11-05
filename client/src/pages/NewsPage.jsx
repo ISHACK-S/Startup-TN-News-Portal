@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getCategories, getNews } from '../api/news.js';
@@ -9,6 +10,7 @@ import { EmptyState, ErrorState, StoryGridSkeleton } from '../components/NewsSta
 import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function NewsPage() {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get('q') ?? '';
@@ -34,7 +36,7 @@ export default function NewsPage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    setError('');
+    setError("");
     getNews({ page, limit: 9, q: query || undefined, category: category || undefined, signal: controller.signal })
       .then(setResult)
       .catch((fetchError) => {
@@ -86,7 +88,7 @@ export default function NewsPage() {
 
       {query && (
         <p className="results-label">
-          {t('Results for')} <strong>“{query}”</strong>{category && <> {t('in')} <strong>{t(categories.find((item) => item.slug === category)?.name ?? category)}</strong></>}
+          {t('Results for')} <strong>{tI18n("“", { defaultValue: "“" })}{query}{tI18n("”", { defaultValue: "”" })}</strong>{category && <> {t('in')} <strong>{t(categories.find((item) => item.slug === category)?.name ?? category)}</strong></>}
         </p>
       )}
 
@@ -113,7 +115,7 @@ export default function NewsPage() {
                 disabled={page <= 1}
                 onClick={() => updateFilters({ page: String(page - 1) })}
               >
-                <span aria-hidden="true">←</span> {t('Previous')}
+                <span aria-hidden="true">{tI18n("←", { defaultValue: "←" })}</span> {t('Previous')}
               </button>
               <span aria-live="polite">{t('Page')} {page} {t('of')} {pagination.totalPages}</span>
               <button
@@ -122,7 +124,7 @@ export default function NewsPage() {
                 disabled={page >= pagination.totalPages}
                 onClick={() => updateFilters({ page: String(page + 1) })}
               >
-                {t('Next')} <span aria-hidden="true">→</span>
+                {t('Next')} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span>
               </button>
             </nav>
           )}

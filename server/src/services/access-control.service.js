@@ -1,6 +1,5 @@
 import { pool } from '../database/pool.js';
 import { HttpError } from '../errors/http-error.js';
-import { ADMIN_ROLES } from './auth.service.js';
 import { hashAdminPassword } from './admin-password.service.js';
 
 function searchClause(search) {
@@ -48,9 +47,6 @@ export async function listAdminAccounts(query, database = pool) {
 }
 
 export async function createAdminAccount(database, input, actorAdminId) {
-  if (!ADMIN_ROLES.includes(input.role)) {
-    throw new HttpError(400, 'The administrator role is not supported.');
-  }
   if (input.role === 'Super Admin' && input.confirmSuperAdmin !== true) {
     throw new HttpError(400, 'Explicitly confirm creation of a Super Admin account.');
   }
@@ -67,6 +63,13 @@ export async function createAdminAccount(database, input, actorAdminId) {
     const actor = admins.find((admin) => String(admin.id) === String(actorAdminId));
     if (!actor || actor.role !== 'Super Admin' || Number(actor.is_active) !== 1) {
       throw new HttpError(403, 'Super Admin privileges are required.');
+    }
+    const [roleRows] = await database.execute(
+      'SELECT role_key, is_active FROM permission_roles WHERE label = ? LIMIT 1 FOR UPDATE',
+      [input.role]
+    );
+    if (!roleRows[0] || Number(roleRows[0].is_active) !== 1) {
+      throw new HttpError(400, 'The administrator role is inactive or not supported.');
     }
 
     const [existing] = await database.execute(

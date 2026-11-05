@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getAdminArticles } from '../../api/admin.js';
@@ -7,6 +8,7 @@ import { useAdminAuth } from '../AdminAuthContext.jsx';
 import { useAdminPermissions } from '../AdminPermissionContext.jsx';
 
 export default function AdminDashboardPage() {
+  const { t: tI18n } = useTranslation('admin');
   const { admin } = useAdminAuth();
   const { permissions, hasPermission } = useAdminPermissions();
   const [counts, setCounts] = useState({ published: 0, draft: 0 });
@@ -17,7 +19,7 @@ export default function AdminDashboardPage() {
 
   const load = useCallback(async (signal) => {
     setLoading(true);
-    setError('');
+    setError("");
     if (!hasPermission('news-articles', 'view')) {
       setRecent([]);
       setLoading(false);
@@ -51,28 +53,28 @@ export default function AdminDashboardPage() {
     <div className="admin-page">
       <div className="admin-page-heading">
         <div>
-          <span className="admin-eyebrow">Administrative overview</span>
-          <h1>Overview</h1>
-          <p>Your workspace and editorial activity, tailored to your access.</p>
+          <span className="admin-eyebrow">{tI18n("Administrative overview", { defaultValue: "Administrative overview" })}</span>
+          <h1>{tI18n("Overview", { defaultValue: "Overview" })}</h1>
+          <p>{tI18n("Your workspace and editorial activity, tailored to your access.", { defaultValue: "Your workspace and editorial activity, tailored to your access." })}</p>
         </div>
         <span className="admin-role-pill">{admin?.role}</span>
       </div>
 
       <section className="admin-panel admin-welcome-panel">
         <div>
-          <span className="admin-eyebrow">Your access</span>
-          <h2>Welcome back, {admin?.name}</h2>
-          <p>Your role is <strong>{admin?.role}</strong>. Available modules and actions are enforced by the server.</p>
+          <span className="admin-eyebrow">{tI18n("Your access", { defaultValue: "Your access" })}</span>
+          <h2>{tI18n("Welcome back,", { defaultValue: "Welcome back," })} {admin?.name}</h2>
+          <p>{tI18n("Your role is", { defaultValue: "Your role is" })} <strong>{admin?.role}</strong>{tI18n(". Available modules and actions are enforced by the server.", { defaultValue: ". Available modules and actions are enforced by the server." })}</p>
         </div>
-        <div className="admin-dashboard-actions" aria-label="Quick actions">
+        <div className="admin-dashboard-actions" aria-label={tI18n("Quick actions", { defaultValue: "Quick actions" })}>
           {hasPermission('news-articles', 'create') && (
-            <Link className="admin-button admin-button--primary" to="/admin/news/new">＋ New article</Link>
+            <Link className="admin-button admin-button--primary" to="/admin/news/new">{tI18n("＋ New article", { defaultValue: "＋ New article" })}</Link>
           )}
           {hasPermission('news-articles', 'view') && (
-            <Link className="admin-button admin-button--secondary" to="/admin/news">Manage articles</Link>
+            <Link className="admin-button admin-button--secondary" to="/admin/news">{tI18n("Manage articles", { defaultValue: "Manage articles" })}</Link>
           )}
           {hasPermission('role-builder', 'view') && (
-            <Link className="admin-button admin-button--secondary" to="/admin/role-builder">Manage roles</Link>
+            <Link className="admin-button admin-button--secondary" to="/admin/role-builder">{tI18n("Manage roles", { defaultValue: "Manage roles" })}</Link>
           )}
         </div>
       </section>
@@ -82,7 +84,7 @@ export default function AdminDashboardPage() {
       {!loading && !error && (
         <>
           {hasPermission('news-articles', 'view') && (
-            <section className="admin-stat-grid" aria-label="Article totals">
+            <section className="admin-stat-grid" aria-label={tI18n("Article totals", { defaultValue: "Article totals" })}>
               <StatCard label="Published articles" value={counts.published} detail="Visible to the public" tone="red" />
               <StatCard label="Drafts" value={counts.draft} detail="In editorial review" />
               <StatCard label="Total articles" value={counts.published + counts.draft} detail="Across all statuses" />
@@ -92,10 +94,10 @@ export default function AdminDashboardPage() {
           {hasPermission('news-articles', 'view') && <section className="admin-panel">
             <div className="admin-panel-heading">
               <div>
-                <span className="admin-eyebrow">Recently updated</span>
-                <h2>Latest articles</h2>
+                <span className="admin-eyebrow">{tI18n("Recently updated", { defaultValue: "Recently updated" })}</span>
+                <h2>{tI18n("Latest articles", { defaultValue: "Latest articles" })}</h2>
               </div>
-              <Link className="admin-inline-link" to="/admin/news">Manage articles <span aria-hidden="true">→</span></Link>
+              <Link className="admin-inline-link" to="/admin/news">{tI18n("Manage articles", { defaultValue: "Manage articles" })} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span></Link>
             </div>
             {recent.length ? (
               <div className="admin-recent-list">
@@ -107,13 +109,13 @@ export default function AdminDashboardPage() {
                     </span>
                     <StatusBadge status={article.status} />
                     <span className="admin-recent-date">{formatDate(article.updated_at)}</span>
-                    <span className="admin-row-arrow" aria-hidden="true">→</span>
+                    <span className="admin-row-arrow" aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span>
                   </Link>
                 ))}
               </div>
             ) : (
               <AdminEmpty
-                title="Your newsroom is ready."
+                title={tI18n("Your newsroom is ready.", { defaultValue: "Your newsroom is ready." })}
                 message="Create a draft or publish your first story to get started."
               />
             )}
@@ -122,8 +124,8 @@ export default function AdminDashboardPage() {
           <section className="admin-panel admin-available-modules">
             <div className="admin-panel-heading">
               <div>
-                <span className="admin-eyebrow">Permission-aware workspace</span>
-                <h2>Available modules</h2>
+                <span className="admin-eyebrow">{tI18n("Permission-aware workspace", { defaultValue: "Permission-aware workspace" })}</span>
+                <h2>{tI18n("Available modules", { defaultValue: "Available modules" })}</h2>
               </div>
             </div>
             <div className="admin-module-list">
@@ -144,10 +146,12 @@ export default function AdminDashboardPage() {
 }
 
 export function StatusBadge({ status }) {
+  const { t: tI18n } = useTranslation('admin');
   return <span className={`admin-status admin-status--${status}`}>{status === 'published' ? 'Published' : 'Draft'}</span>;
 }
 
 function StatCard({ label, value, detail, tone }) {
+  const { t: tI18n } = useTranslation('admin');
   return (
     <article className={`admin-stat-card${tone ? ` admin-stat-card--${tone}` : ''}`}>
       <span>{label}</span>

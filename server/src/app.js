@@ -15,6 +15,9 @@ import { healthRouter } from './routes/health.routes.js';
 import { adminUploadRouter } from './routes/admin-uploads.routes.js';
 import { adminAccessControlRouter } from './routes/admin-access-control.routes.js';
 import { adminPermissionsRouter } from './routes/admin-permissions.routes.js';
+import { adminWebsiteConfigurationRouter } from './routes/admin-website-configuration.routes.js';
+import { adminActivityRouter } from './routes/admin-activity.routes.js';
+import { captureAdminActivity, requestCorrelationId } from './middleware/admin-activity.js';
 import {
   adminHeroSlidesRouter,
   adminMediaRouter,
@@ -56,6 +59,9 @@ export function createApp({
     })
   );
 
+  app.use(requestCorrelationId);
+  app.use('/api/admin', captureAdminActivity);
+  app.use('/api/auth', captureAdminActivity);
   app.use('/api/health', healthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api', publicRouter);
@@ -63,10 +69,12 @@ export function createApp({
   app.use('/api/admin/articles', adminArticleRouter);
   app.use('/api/admin/access-control', adminAccessControlRouter);
   app.use('/api/admin/access-control/permissions', adminPermissionsRouter);
+  app.use('/api/admin/site-config', adminWebsiteConfigurationRouter);
   app.use('/api/admin/media', adminMediaRouter);
   app.use('/api/admin/web-stories', adminWebStoriesRouter);
   app.use('/api/admin/hero-slides', adminHeroSlidesRouter);
   app.use('/api/admin/videos', adminVideosRouter);
+  app.use('/api/admin/monthly-reports', adminActivityRouter);
 
   app.use(notFound);
   app.use(errorHandler);

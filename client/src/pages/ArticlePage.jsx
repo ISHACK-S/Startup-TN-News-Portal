@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { getArticle, getNews } from '../api/news.js';
@@ -10,6 +11,7 @@ import { ErrorState, LoadingArticle } from '../components/NewsStates.jsx';
 import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function ArticlePage() {
+  const { t: tI18n } = useTranslation('public');
   const { language, translate: t } = usePublicPreferences();
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -25,7 +27,7 @@ export default function ArticlePage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    setError('');
+    setError("");
     setArticle(null);
     getArticle(slug, { signal: controller.signal })
       .then(setArticle)
@@ -90,7 +92,7 @@ export default function ArticlePage() {
           message={t(error || 'This story may have moved, or is no longer available.')}
           onRetry={error ? () => setAttempt((value) => value + 1) : undefined}
         />
-        <Link className="text-link" to="/news/">← {t('Back to latest news')}</Link>
+        <Link className="text-link" to="/news/">{tI18n("←", { defaultValue: "←" })} {t('Back to latest news')}</Link>
       </div>
     );
   }
@@ -128,11 +130,11 @@ export default function ArticlePage() {
         <div className="article-heading site-shell">
           <nav className="article-breadcrumbs" aria-label={t('Breadcrumb')}>
             <Link to="/">{t('Home')}</Link>
-            <span aria-hidden="true">/</span>
+            <span aria-hidden="true">{tI18n("/", { defaultValue: "/" })}</span>
             <Link to="/news/">{t('News')}</Link>
             {article.category_name && (
               <>
-                <span aria-hidden="true">/</span>
+                <span aria-hidden="true">{tI18n("/", { defaultValue: "/" })}</span>
                 <Link to={article.category_slug ? `/news/?category=${article.category_slug}` : '/news/'}>
                   {t(article.category_name)}
                 </Link>
@@ -148,7 +150,7 @@ export default function ArticlePage() {
             <span>{readingMinutes} {t('min read')}</span>
           </div>
         </div>
-        <span className="article-cover-mark" aria-hidden="true">STARTUPTN / NEWS</span>
+        <span className="article-cover-mark" aria-hidden="true">{tI18n("STARTUPTN / NEWS", { defaultValue: "STARTUPTN / NEWS" })}</span>
       </header>
 
       <div className="article-body-wrap">
@@ -169,10 +171,10 @@ export default function ArticlePage() {
             </div>
             <div className="share-row" aria-label={t('Share this story')}>
               <span>{t('Share this story')}</span>
-              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on Facebook')}>f</a>
-              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on LinkedIn')}>in</a>
-              <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(articleUrl)}&text=${shareText}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on X')}>𝕏</a>
-              <a href={`mailto:?subject=${shareText}&body=${encodeURIComponent(articleUrl)}`} aria-label={t('Share by email')}>✉</a>
+              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on Facebook')}>{tI18n("f", { defaultValue: "f" })}</a>
+              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(articleUrl)}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on LinkedIn')}>{tI18n("in", { defaultValue: "in" })}</a>
+              <a href={`https://twitter.com/intent/tweet?url=${encodeURIComponent(articleUrl)}&text=${shareText}`} target="_blank" rel="noopener noreferrer" aria-label={t('Share on X')}>{tI18n("𝕏", { defaultValue: "𝕏" })}</a>
+              <a href={`mailto:?subject=${shareText}&body=${encodeURIComponent(articleUrl)}`} aria-label={t('Share by email')}>{tI18n("✉", { defaultValue: "✉" })}</a>
             </div>
           </div>
           <aside className="article-sidebar" aria-label={t('More from the newsroom')}>
@@ -192,14 +194,14 @@ export default function ArticlePage() {
               </dl>
               {article.source_url && (
                 <a className="article-sidebar-source" href={article.source_url} target="_blank" rel="noopener noreferrer">
-                  {t('View original source')} <span aria-hidden="true">↗</span>
+                  {t('View original source')} <span aria-hidden="true">{tI18n("↗", { defaultValue: "↗" })}</span>
                 </a>
               )}
             </section>
             <section className="article-sidebar-panel article-recent-panel">
               <div className="article-sidebar-heading">
                 <div><span className="eyebrow">{t('Fresh from the desk')}</span><h2>{t('Recent stories')}</h2></div>
-                <Link to="/news/" aria-label={t('Browse all recent stories')}>{t('All news')} <span aria-hidden="true">→</span></Link>
+                <Link to="/news/" aria-label={t('Browse all recent stories')}>{t('All news')} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span></Link>
               </div>
               {recentStoriesError && <p className="article-sidebar-note">{t('Recent stories are temporarily unavailable.')}</p>}
               {!recentStoriesError && recommendations.slice(0, 2).map((story) => (
@@ -215,7 +217,7 @@ export default function ArticlePage() {
           <RevealSection className="article-related" aria-labelledby="article-related-heading">
             <div className="article-related-heading">
               <div><span className="eyebrow">{t('Continue exploring')}</span><h2 id="article-related-heading">{t('More from the newsroom')}</h2></div>
-              <Link className="text-link" to="/news/">{t('All stories')} <span aria-hidden="true">→</span></Link>
+              <Link className="text-link" to="/news/">{t('All stories')} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span></Link>
             </div>
             <div className="article-related-grid">
               {recommendations.map((story, index) => (
@@ -230,6 +232,7 @@ export default function ArticlePage() {
 }
 
 function RecentStory({ story, index = 0 }) {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   return (
     <article className="article-recent-story" data-reveal-item="" style={{ '--story-order': index }}>

@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import {
   PERMISSION_ACTIONS,
-  PERMISSION_MODULE_IDS,
-  PERMISSION_ROLE_KEYS
+  PERMISSION_MODULE_IDS
 } from '../permissions/registry.js';
 
 const adminIdSchema = z
@@ -15,6 +14,7 @@ const adminIdSchema = z
 
 const moduleIdSchema = z.enum(PERMISSION_MODULE_IDS);
 const actionIdSchema = z.enum(PERMISSION_ACTIONS);
+const roleKeySchema = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).max(64);
 
 export const permissionModuleParamsSchema = z.object({
   moduleId: moduleIdSchema
@@ -25,11 +25,10 @@ export const permissionModuleUpdateSchema = z.object({
 }).strict();
 
 export const permissionRoleParamsSchema = z.object({
-  roleKey: z.enum(PERMISSION_ROLE_KEYS)
+  roleKey: roleKeySchema
 }).strict();
 
-export const rolePermissionUpdateSchema = z.object({
-  permissions: z.array(z.object({
+const permissionChangesSchema = z.array(z.object({
     moduleId: moduleIdSchema,
     actions: z.object(
       Object.fromEntries(PERMISSION_ACTIONS.map((action) => [action, z.boolean().optional()]))
@@ -37,10 +36,35 @@ export const rolePermissionUpdateSchema = z.object({
       (actions) => Object.values(actions).some((value) => value !== undefined),
       { message: 'Provide at least one action for each module.' }
     )
-  }).strict()).min(1).max(PERMISSION_MODULE_IDS.length)
-}).strict().refine(
-  ({ permissions }) => new Set(permissions.map(({ moduleId }) => moduleId)).size === permissions.length,
+  }).strict()).max(PERMISSION_MODULE_IDS.length).refine(
+  (permissions) => new Set(permissions.map(({ moduleId }) => moduleId)).size === permissions.length,
   { message: 'A module can appear only once in a permission update.' }
+);
+
+export const rolePermissionUpdateSchema = z.object({
+  permissions: permissionChangesSchema.min(1)
+}).strict();
+
+const customRoleFields = {
+  label: z.string().trim().min(2).max(100),
+  description: z.string().trim().max(500).default(''),
+  isActive: z.boolean().default(true)
+};
+
+export const customRoleCreateSchema = z.object({
+  roleKey: roleKeySchema,
+  ...customRoleFields,
+  permissions: permissionChangesSchema.optional().default([])
+}).strict();
+
+export const customRoleUpdateSchema = z.object({
+  label: customRoleFields.label.optional(),
+  description: customRoleFields.description.optional(),
+  isActive: customRoleFields.isActive.optional(),
+  permissions: permissionChangesSchema.optional()
+}).strict().refine(
+  (changes) => Object.keys(changes).length > 0,
+  { message: 'Provide at least one role change.' }
 );
 
 export const permissionAccountParamsSchema = z.object({

@@ -3,11 +3,13 @@ import { describe, it } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import {
   runAdminPermissionsMigration,
+  runModuleCatalogMigration,
   runRoleBuilderMigration
 } from '../scripts/migrate-admin-authorization.js';
 import {
   PERMISSION_ACTIONS,
   PERMISSION_MODULE_IDS,
+  PERMISSION_MODULES,
   PERMISSION_ROLE_KEYS
 } from '../src/permissions/registry.js';
 
@@ -56,6 +58,16 @@ function createMigrationConnection({ tables = [], applied = false, missingModule
       if (sql === 'SELECT module_id FROM permission_modules') {
         return [[...state.modules].map((module_id) => ({ module_id }))];
       }
+      if (sql === 'SELECT module_id, label, navigation_group FROM permission_modules') {
+        return [[...state.modules].map((module_id) => {
+          const module = PERMISSION_MODULES.find(({ id }) => id === module_id);
+          return {
+            module_id,
+            label: module?.label ?? module_id,
+            navigation_group: module?.group ?? 'Obsolete'
+          };
+        })];
+      }
       if (sql === 'SELECT action_id FROM permission_actions') {
         return [[...state.actions].map((action_id) => ({ action_id }))];
       }
@@ -63,10 +75,11 @@ function createMigrationConnection({ tables = [], applied = false, missingModule
         return [[...state.roles].map((role_key) => ({ role_key }))];
       }
       if (sql.startsWith('SELECT') && sql.includes('AS limit_count')) {
-        return [[{
-          limit_count: state.limitCount,
-          permission_count: state.permissionCount
-        }]];
+        return [[...state.roles].map((role_key) => ({
+          role_key,
+          limit_count: state.limitCount / Math.max(state.roles.size, 1),
+          permission_count: state.permissionCount / Math.max(state.roles.size, 1)
+        }))];
       }
       if (sql.startsWith('CREATE TABLE ')) {
         const table = sql.match(/^CREATE TABLE ([a-z_]+)/)[1];
@@ -88,6 +101,11 @@ function createMigrationConnection({ tables = [], applied = false, missingModule
         state.limitCount = PERMISSION_ROLE_KEYS.length * PERMISSION_MODULE_IDS.length * PERMISSION_ACTIONS.length;
       }
       if (sql.startsWith('INSERT INTO role_module_permissions')) {
+        state.permissionCount = PERMISSION_ROLE_KEYS.length * PERMISSION_MODULE_IDS.length * PERMISSION_ACTIONS.length;
+      }
+      if (sql.startsWith('DELETE FROM permission_modules')) {
+        state.modules = new Set(PERMISSION_MODULE_IDS);
+        state.limitCount = PERMISSION_ROLE_KEYS.length * PERMISSION_MODULE_IDS.length * PERMISSION_ACTIONS.length;
         state.permissionCount = PERMISSION_ROLE_KEYS.length * PERMISSION_MODULE_IDS.length * PERMISSION_ACTIONS.length;
       }
       if (sql.startsWith('INSERT INTO schema_migrations')) state.applied.add(values[0]);
@@ -125,7 +143,7 @@ describe('admin permissions database migration', () => {
     const conflicting = createMigrationConnection({
       tables: Object.keys(tableColumns),
       applied: true,
-      missingModule: 'audit-logs'
+      missingModule: 'web-stories'
     });
     await assert.rejects(runAdminPermissionsMigration(conflicting.connection), /module registry/);
     assert.equal(conflicting.state.releases, 1);
@@ -137,6 +155,43 @@ describe('admin permissions database migration', () => {
     });
     await assert.rejects(runAdminPermissionsMigration(conflictingActions.connection), /action registry/);
     assert.equal(conflictingActions.state.releases, 1);
+  });
+
+  it('cleans obsolete module records and their grants while preserving built-in roles', async () => {
+    const { connection, state } = createMigrationConnection({
+      tables: Object.keys(tableColumns),
+      applied: true
+    });
+    const obsoleteIds = [
+      'profile-settings', 'monthly-reports', 'citizen-services', 'faq-management',
+      'police-stations', 'helplines-registry', 'portal-links', 'official-alerts',
+      'session-management', 'security-events', 'audit-logs', 'system-configuration',
+      'backup-restore', 'api-key-configuration', 'smtp-configuration'
+    ];
+    for (const id of obsoleteIds) state.modules.add(id);
+    state.limitCount += PERMISSION_ROLE_KEYS.length * obsoleteIds.length * PERMISSION_ACTIONS.length;
+    state.permissionCount += PERMISSION_ROLE_KEYS.length * obsoleteIds.length * PERMISSION_ACTIONS.length;
+
+    const sql = await readFile(new URL('../../database/migrations/007_startuptn_module_catalog.sql', import.meta.url), 'utf8');
+    for (const table of ['account_permission_overrides', 'role_module_permissions', 'role_permission_limits', 'permission_modules']) {
+      assert.match(sql, new RegExp(`DELETE FROM ${table}`));
+    }
+
+    assert.deepEqual(await runModuleCatalogMigration(connection), {
+      applied: true,
+      migrationId: '007_startuptn_module_catalog'
+    });
+    assert.deepEqual(state.modules, new Set(PERMISSION_MODULE_IDS));
+    assert.deepEqual(state.roles, new Set(PERMISSION_ROLE_KEYS));
+    assert.equal(state.limitCount, PERMISSION_ROLE_KEYS.length * PERMISSION_MODULE_IDS.length * PERMISSION_ACTIONS.length);
+    assert.equal(state.permissionCount, PERMISSION_ROLE_KEYS.length * PERMISSION_MODULE_IDS.length * PERMISSION_ACTIONS.length);
+    assert.equal(state.applied.has('007_startuptn_module_catalog'), true);
+
+    assert.deepEqual(await runModuleCatalogMigration(connection), {
+      applied: false,
+      migrationId: '007_startuptn_module_catalog'
+    });
+    assert.equal(state.releases, 2);
   });
 
   it('enables the implemented Role Builder module once and verifies repeat runs', async () => {

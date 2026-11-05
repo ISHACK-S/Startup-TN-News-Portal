@@ -31,6 +31,10 @@ export function getCategories({ signal } = {}) {
   return request('/categories', { signal }).then((result) => result.data);
 }
 
+export function getPublicWebsiteConfiguration({ signal } = {}) {
+  return request('/site-config', { signal }).then((result) => result.data);
+}
+
 export function getNews({ page = 1, limit = 9, q, category, signal } = {}) {
   const search = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (q) search.set('q', q);
@@ -56,6 +60,22 @@ export function getPublicHeroSlides({ signal } = {}) {
   return request('/hero-slides?page=1&limit=50', { signal });
 }
 
-export function getPublicVideos({ page = 1, limit = 20, signal } = {}) {
-  return request(`/videos?page=${page}&limit=${limit}`, { signal });
+export function getPublicVideos({ page = 1, limit = 20, q, category, featured, signal } = {}) {
+  const search = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (q) search.set('q', q);
+  if (category) search.set('category', category);
+  if (featured !== undefined) search.set('featured', String(featured));
+  return request(`/videos?${search}`, { signal });
+}
+
+export function getPublicVideo(id, { signal } = {}) {
+  return request(`/videos/${encodeURIComponent(id)}`, { signal }).then((result) => result.data);
+}
+
+export function getFeaturedPublicVideo({ signal } = {}) {
+  return request('/videos/featured', { signal }).then((result) => result.data);
+}
+
+export function getPublicVideoCategories({ signal } = {}) {
+  return request('/videos/categories', { signal }).then((result) => result.data);
 }

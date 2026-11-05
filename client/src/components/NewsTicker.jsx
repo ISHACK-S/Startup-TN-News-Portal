@@ -1,8 +1,10 @@
+import { useTranslation } from 'react-i18next';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function NewsTicker({ articles }) {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   const viewportRef = useRef(null);
   const groupRef = useRef(null);
@@ -71,7 +73,7 @@ export default function NewsTicker({ articles }) {
         <p className="news-ticker-empty">{t('Published stories from the Tamil Nadu startup ecosystem.')}</p>
       )}
       <Link className="news-ticker-more" to="/news/" aria-label={t('Browse all latest headlines')}>
-        {t('All news')} <span aria-hidden="true">↗</span>
+        {t('All news')} <span aria-hidden="true">{tI18n("↗", { defaultValue: "↗" })}</span>
       </Link>
     </nav>
   );

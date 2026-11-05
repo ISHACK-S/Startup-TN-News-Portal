@@ -10,7 +10,7 @@
     "dev": "concurrently \"npm run dev --workspace=@startuptn-news/server\" \"npm run dev --workspace=@startuptn-news/client\"",
     "start": "npm run start --workspace=@startuptn-news/server",
     "build": "npm run build --workspace=@startuptn-news/client",
-    "check": "npm run check --workspace=@startuptn-news/server && npm run build --workspace=@startuptn-news/client",
+    "check": "npm run check --workspace=@startuptn-news/server && npm run check-profile --workspace=@startuptn-news/server && npm run check-website-configuration --workspace=@startuptn-news/server && npm run check-activity-reports --workspace=@startuptn-news/server && npm run build --workspace=@startuptn-news/client",
     "test": "npm run test --workspace=@startuptn-news/server && npm run test --workspace=@startuptn-news/client",
     "provision-admin": "npm run provision-admin --workspace=@startuptn-news/server",
     "update-admin-credentials": "npm run update-admin-credentials --workspace=@startuptn-news/server",

@@ -1,8 +1,10 @@
+import { useTranslation } from 'react-i18next';
 import { useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAdminAuth } from '../AdminAuthContext.jsx';
 
 export default function AdminLoginPage() {
+  const { t: tI18n } = useTranslation('admin');
   const { admin, checking, sessionError, signIn } = useAdminAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -12,12 +14,12 @@ export default function AdminLoginPage() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  if (checking) return <div className="admin-auth-loading" role="status">Checking your admin session…</div>;
+  if (checking) return <div className="admin-auth-loading" role="status">{tI18n("Checking your admin session…", { defaultValue: "Checking your admin session…" })}</div>;
   if (admin && !submitting.current) return <Navigate to="/admin" replace />;
 
   async function submit(event) {
     event.preventDefault();
-    setError('');
+    setError("");
     submitting.current = true;
     setBusy(true);
     try {
@@ -37,18 +39,18 @@ export default function AdminLoginPage() {
   return (
     <main className="admin-login-page">
       <section className="admin-login-card">
-        <Link className="admin-login-brand" to="/" aria-label="StartupTN News home">
-          <span className="admin-brand-word">Startup<span>TN</span></span>
-          <span className="admin-brand-subtitle">NEWS · IDEAS · ECOSYSTEM</span>
+        <Link className="admin-login-brand" to="/" aria-label={tI18n("StartupTN News home", { defaultValue: "StartupTN News home" })}>
+          <span className="admin-brand-word">{tI18n("Startup", { defaultValue: "Startup" })}<span>{tI18n("TN", { defaultValue: "TN" })}</span></span>
+          <span className="admin-brand-subtitle">{tI18n("NEWS · IDEAS · ECOSYSTEM", { defaultValue: "NEWS · IDEAS · ECOSYSTEM" })}</span>
         </Link>
         <div className="admin-login-intro">
-          <span className="admin-eyebrow">Editorial workspace</span>
-          <h1>Welcome back.</h1>
-          <p>Sign in with your authorized newsroom account.</p>
+          <span className="admin-eyebrow">{tI18n("Editorial workspace", { defaultValue: "Editorial workspace" })}</span>
+          <h1>{tI18n("Welcome back.", { defaultValue: "Welcome back." })}</h1>
+          <p>{tI18n("Sign in with your authorized newsroom account.", { defaultValue: "Sign in with your authorized newsroom account." })}</p>
         </div>
         {sessionError && <p className="admin-form-error" role="alert">{sessionError}</p>}
         <form className="admin-form" onSubmit={submit}>
-          <label htmlFor="admin-email">Email address</label>
+          <label htmlFor="admin-email">{tI18n("Email address", { defaultValue: "Email address" })}</label>
           <input
             id="admin-email"
             type="email"
@@ -57,7 +59,7 @@ export default function AdminLoginPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-          <label htmlFor="admin-password">Password</label>
+          <label htmlFor="admin-password">{tI18n("Password", { defaultValue: "Password" })}</label>
           <input
             id="admin-password"
             type="password"
@@ -71,7 +73,7 @@ export default function AdminLoginPage() {
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
-        <p className="admin-login-footnote">Access is limited to provisioned editorial accounts.</p>
+        <p className="admin-login-footnote">{tI18n("Access is limited to provisioned editorial accounts.", { defaultValue: "Access is limited to provisioned editorial accounts." })}</p>
       </section>
     </main>
   );

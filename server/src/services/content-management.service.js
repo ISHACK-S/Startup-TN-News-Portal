@@ -42,6 +42,20 @@ function translateDuplicate(error, message) {
   throw error;
 }
 
+export const VIDEO_CATEGORIES = Object.freeze([
+  'Events',
+  'Startup Stories',
+  'Interviews',
+  'Founder Stories',
+  'Industry Insights',
+  'Innovation',
+  'Ecosystem Updates'
+]);
+
+export function getVideoCategories() {
+  return [...VIDEO_CATEGORIES];
+}
+
 export async function registerMediaAsset(asset, filename, adminId, database = pool) {
   const publicId = asset.provider_id;
   if (!publicId || !asset.url) throw new HttpError(502, 'The image provider returned incomplete asset details.');
@@ -324,38 +338,60 @@ export async function deleteHeroSlide(id, database = pool) {
   if (!result.affectedRows) throw new HttpError(404, 'Hero slide not found.');
 }
 
-function videoEmbed(sourceUrl) {
-  const url = new URL(sourceUrl);
-  const host = url.hostname.toLowerCase();
-  let provider;
-  let id;
-  if (['youtu.be', 'youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'].includes(host)) {
-    provider = 'youtube';
-    id = host === 'youtu.be'
-      ? url.pathname.split('/')[1]
-      : url.searchParams.get('v') ?? url.pathname.match(/^\/(?:embed|shorts)\/([^/]+)/)?.[1];
-    if (!/^[A-Za-z0-9_-]{11}$/.test(id ?? '')) throw new HttpError(400, 'The YouTube video URL is invalid.');
-    return { provider, embed_id: id, embed_url: `https://www.youtube-nocookie.com/embed/${id}` };
+export function parseYouTubeVideo(sourceUrl) {
+  let url;
+  try {
+    url = new URL(sourceUrl);
+  } catch {
+    throw new HttpError(400, 'Enter a valid YouTube video URL.');
   }
-  provider = 'vimeo';
-  id = url.pathname.match(/\/(?:video\/)?(\d{5,12})\/?$/)?.[1];
-  if (!id) throw new HttpError(400, 'The Vimeo video URL is invalid.');
-  return { provider, embed_id: id, embed_url: `https://player.vimeo.com/video/${id}` };
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) {
+    throw new HttpError(400, 'Use a secure YouTube video URL.');
+  }
+  const host = url.hostname.toLowerCase();
+  if (!['youtu.be', 'youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(host)) {
+    throw new HttpError(400, 'Only YouTube video URLs are supported.');
+  }
+  const id = host === 'youtu.be'
+    ? url.pathname.match(/^\/([A-Za-z0-9_-]{11})\/?$/)?.[1]
+    : url.pathname === '/watch'
+      ? url.searchParams.get('v')
+      : url.pathname.match(/^\/(?:embed|shorts)\/([A-Za-z0-9_-]{11})\/?$/)?.[1];
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id ?? '')) {
+    throw new HttpError(400, 'The YouTube video URL is invalid.');
+  }
+  return {
+    provider: 'youtube',
+    embed_id: id,
+    embed_url: `https://www.youtube-nocookie.com/embed/${id}?rel=0`,
+    thumbnail_url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+  };
 }
 
 const VIDEO_SELECT = `SELECT id, title, description, source_url, provider, embed_id,
-                             thumbnail_url, thumbnail_alt, category, display_order,
+                             thumbnail_url, thumbnail_alt, category, is_featured, display_order,
                              status, published_at, created_at, updated_at
                       FROM media_videos`;
 
 function addVideoEmbed(video) {
-  return { ...video, embed_url: videoEmbed(video.source_url).embed_url };
+  if (video.provider !== 'youtube') {
+    return { ...video, is_featured: Boolean(video.is_featured), embed_url: null, watch_url: video.source_url };
+  }
+  const parsed = parseYouTubeVideo(video.source_url);
+  return {
+    ...video,
+    is_featured: Boolean(video.is_featured),
+    thumbnail_is_custom: Boolean(video.thumbnail_url),
+    thumbnail_url: video.thumbnail_url || parsed.thumbnail_url,
+    embed_url: parsed.embed_url,
+    watch_url: `https://www.youtube.com/watch?v=${parsed.embed_id}`
+  };
 }
 
 export async function listVideos(query, database = pool, { publicOnly = false } = {}) {
   const filters = [];
   const values = [];
-  if (publicOnly) filters.push("status = 'published'", 'published_at IS NOT NULL');
+  if (publicOnly) filters.push("provider = 'youtube'", "status = 'published'", 'published_at IS NOT NULL');
   else if (query.status) {
     filters.push('status = ?');
     values.push(query.status);
@@ -364,17 +400,47 @@ export async function listVideos(query, database = pool, { publicOnly = false } 
     filters.push('provider = ?');
     values.push(query.provider);
   }
+  if (query.category) {
+    filters.push('category = ?');
+    values.push(query.category);
+  }
+  if (query.featured !== undefined) {
+    filters.push('is_featured = ?');
+    values.push(query.featured ? 1 : 0);
+  }
   const search = searchClause(query.q, ['title', 'description', 'category']);
   const where = `WHERE ${filters.length ? filters.join(' AND ') : '1 = 1'}${search.sql}`;
   const args = [...values, ...search.values];
-  const result = await pagedQuery(database, {
-    countSql: `SELECT COUNT(*) AS total FROM media_videos ${where}`,
-    dataSql: `${VIDEO_SELECT} ${where} ORDER BY display_order ASC, id ASC LIMIT ? OFFSET ?`,
-    values: args,
-    page: query.page,
-    limit: query.limit
-  });
-  return { ...result, data: result.data.map(addVideoEmbed) };
+  const order = publicOnly
+    ? 'ORDER BY published_at DESC, id DESC'
+    : 'ORDER BY updated_at DESC, id DESC';
+  const [[count]] = await database.execute(`SELECT COUNT(*) AS total FROM media_videos ${where}`, args);
+  const [data] = await database.execute(
+    `${VIDEO_SELECT} ${where} ${order} LIMIT ? OFFSET ?`,
+    [...args, query.limit, (query.page - 1) * query.limit]
+  );
+  const [summaryRows] = publicOnly
+    ? [[]]
+    : await database.execute(
+      `SELECT COUNT(*) AS total,
+              SUM(status = 'published') AS published,
+              SUM(status = 'draft') AS drafts,
+              SUM(is_featured = 1) AS featured
+       FROM media_videos`
+    );
+  const result = {
+    data: data.map(addVideoEmbed),
+    pagination: pagination(query.page, query.limit, Number(count.total)),
+    ...(!publicOnly ? {
+      summary: {
+        total: Number(summaryRows[0]?.total ?? 0),
+        published: Number(summaryRows[0]?.published ?? 0),
+        drafts: Number(summaryRows[0]?.drafts ?? 0),
+        featured: Number(summaryRows[0]?.featured ?? 0)
+      }
+    } : {})
+  };
+  return result;
 }
 
 export async function getVideo(id, database = pool) {
@@ -382,46 +448,124 @@ export async function getVideo(id, database = pool) {
   return rows[0] ? addVideoEmbed(rows[0]) : null;
 }
 
+export async function getPublicVideo(id, database = pool) {
+  const [rows] = await database.execute(
+    `${VIDEO_SELECT}
+     WHERE id = ? AND provider = 'youtube' AND status = 'published' AND published_at IS NOT NULL
+     LIMIT 1`,
+    [id]
+  );
+  return rows[0] ? addVideoEmbed(rows[0]) : null;
+}
+
+export async function getFeaturedVideo(database = pool) {
+  const [rows] = await database.execute(
+    `${VIDEO_SELECT}
+     WHERE provider = 'youtube' AND is_featured = 1 AND status = 'published' AND published_at IS NOT NULL
+     ORDER BY published_at DESC, id DESC LIMIT 1`
+  );
+  return rows[0] ? addVideoEmbed(rows[0]) : null;
+}
+
 function videoValues(input) {
-  const parsed = videoEmbed(input.source_url);
+  if (!VIDEO_CATEGORIES.includes(input.category)) {
+    throw new HttpError(400, 'Choose a supported video category.');
+  }
+  const parsed = parseYouTubeVideo(input.source_url);
   return [
     input.title, input.description ?? null, input.source_url, parsed.provider, parsed.embed_id,
-    input.thumbnail_url ?? null, input.thumbnail_alt ?? null, input.category ?? null,
-    input.display_order, input.status, input.status === 'published' ? new Date() : null
+    input.thumbnail_url ?? null, input.thumbnail_alt ?? input.title,
+    input.category ?? null, Boolean(input.is_featured), input.display_order, input.status,
+    input.status === 'published' ? new Date() : null
   ];
+}
+
+async function validateVideoThumbnail(thumbnailUrl, database) {
+  if (!thumbnailUrl) return;
+  let url;
+  try {
+    url = new URL(thumbnailUrl);
+  } catch {
+    throw new HttpError(400, 'Choose a thumbnail from the Media Library.');
+  }
+  if (
+    url.protocol !== 'https:'
+    || url.hostname !== 'res.cloudinary.com'
+    || url.username
+    || url.password
+    || url.port
+    || !/^\/[^/]+\/image\/upload\/.+/.test(url.pathname)
+  ) {
+    throw new HttpError(400, 'Choose a thumbnail from the Media Library.');
+  }
+  const [rows] = await database.execute(
+    'SELECT id FROM media_assets WHERE secure_url = ? LIMIT 1',
+    [thumbnailUrl]
+  );
+  if (!rows[0]) throw new HttpError(400, 'The selected thumbnail is not in the Media Library.');
+}
+
+async function ensureUniqueVideo(parsed, database, videoId = 0) {
+  const [rows] = await database.execute(
+    'SELECT id FROM media_videos WHERE provider = ? AND embed_id = ? AND id <> ? LIMIT 1',
+    [parsed.provider, parsed.embed_id, videoId]
+  );
+  if (rows[0]) throw new HttpError(409, 'This YouTube video is already in the media library.');
 }
 
 export async function createVideo(input, adminId, database = pool) {
   const values = videoValues(input);
-  const [result] = await database.execute(
-    `INSERT INTO media_videos
-       (title, description, source_url, provider, embed_id, thumbnail_url, thumbnail_alt,
-        category, display_order, status, created_by, published_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [...values.slice(0, 10), adminId, values[10]]
-  );
-  return getVideo(result.insertId, database);
+  const parsed = parseYouTubeVideo(input.source_url);
+  await validateVideoThumbnail(input.thumbnail_url, database);
+  await ensureUniqueVideo(parsed, database);
+  try {
+    const [result] = await database.execute(
+      `INSERT INTO media_videos
+         (title, description, source_url, provider, embed_id, thumbnail_url, thumbnail_alt,
+          category, is_featured, display_order, status, created_by, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [...values.slice(0, 11), adminId, values[11]]
+    );
+    return getVideo(result.insertId, database);
+  } catch (error) {
+    translateDuplicate(error, 'This YouTube video is already in the media library.');
+  }
 }
 
 export async function updateVideo(id, updates, database = pool) {
   const current = await getVideo(id, database);
   if (!current) throw new HttpError(404, 'Video entry not found.');
   const merged = { ...current, ...updates };
-  const derived = videoEmbed(merged.source_url);
-  const fields = ['title', 'description', 'source_url', 'thumbnail_url', 'thumbnail_alt', 'category', 'display_order', 'status']
+  const derived = parseYouTubeVideo(merged.source_url);
+  if (Object.hasOwn(updates, 'thumbnail_url')) {
+    await validateVideoThumbnail(updates.thumbnail_url, database);
+  }
+  if (Object.hasOwn(updates, 'source_url')) {
+    await ensureUniqueVideo(derived, database, id);
+  }
+  if (Object.hasOwn(updates, 'category') && !VIDEO_CATEGORIES.includes(updates.category)) {
+    throw new HttpError(400, 'Choose a supported video category.');
+  }
+  const fields = ['title', 'description', 'source_url', 'thumbnail_url', 'thumbnail_alt', 'category', 'is_featured', 'display_order', 'status']
     .filter((field) => Object.hasOwn(updates, field));
   const assignments = fields.map((field) => `${field} = ?`);
-  const values = fields.map((field) => updates[field] ?? null);
+  const values = fields.map((field) => field === 'is_featured' ? Boolean(updates[field]) : updates[field] ?? null);
   if (Object.hasOwn(updates, 'source_url')) {
     assignments.push('provider = ?', 'embed_id = ?');
     values.push(derived.provider, derived.embed_id);
   }
   if (updates.status === 'published') assignments.push('published_at = COALESCE(published_at, CURRENT_TIMESTAMP)');
   if (updates.status === 'draft') assignments.push('published_at = NULL');
-  if (assignments.length) await database.execute(
-    `UPDATE media_videos SET ${assignments.join(', ')} WHERE id = ?`,
-    [...values, id]
-  );
+  if (assignments.length) {
+    try {
+      await database.execute(
+        `UPDATE media_videos SET ${assignments.join(', ')} WHERE id = ?`,
+        [...values, id]
+      );
+    } catch (error) {
+      translateDuplicate(error, 'This YouTube video is already in the media library.');
+    }
+  }
   return getVideo(id, database);
 }
 

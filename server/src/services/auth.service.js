@@ -22,6 +22,13 @@ export async function authenticateAdmin(email, password, database = pool) {
   if (!admin || !passwordMatches || Number(admin.is_active) !== 1) {
     throw new HttpError(401, 'Invalid email or password.');
   }
+  const [roleRows] = await database.execute(
+    'SELECT role_key, is_active FROM permission_roles WHERE label = ? LIMIT 1',
+    [admin.role]
+  );
+  if (!roleRows[0] || Number(roleRows[0].is_active) !== 1) {
+    throw new HttpError(401, 'Invalid email or password.');
+  }
 
   return {
     id: admin.id,
@@ -37,9 +44,6 @@ export async function updateAdminAuthorization(
   adminId,
   { role, isActive, actorAdminId }
 ) {
-  if (role !== undefined && !ADMIN_ROLES.includes(role)) {
-    throw new TypeError('The administrator role is not supported.');
-  }
   if (isActive !== undefined && typeof isActive !== 'boolean') {
     throw new TypeError('The administrator active state must be a boolean.');
   }
@@ -67,6 +71,13 @@ export async function updateAdminAuthorization(
     }
 
     const nextRole = role ?? admin.role;
+    const [roleRows] = await database.execute(
+      'SELECT role_key, is_active FROM permission_roles WHERE label = ? LIMIT 1 FOR UPDATE',
+      [nextRole]
+    );
+    if (!roleRows[0] || Number(roleRows[0].is_active) !== 1) {
+      throw new HttpError(400, 'The administrator role is inactive or not supported.');
+    }
     const currentlyActive = Number(admin.is_active) === 1;
     const nextIsActive = isActive ?? currentlyActive;
     const remainsActiveSuperAdmin = nextRole === 'Super Admin' && nextIsActive;
@@ -99,6 +110,8 @@ export async function updateAdminAuthorization(
       return {
         changed: false,
         sessionsInvalidated: 0,
+        previousRole: admin.role,
+        previousIsActive: currentlyActive,
         admin: publicAdmin(admin, nextRole, nextIsActive)
       };
     }
@@ -113,6 +126,8 @@ export async function updateAdminAuthorization(
     return {
       changed: true,
       sessionsInvalidated,
+      previousRole: admin.role,
+      previousIsActive: currentlyActive,
       admin: publicAdmin(admin, nextRole, nextIsActive)
     };
   } catch (error) {

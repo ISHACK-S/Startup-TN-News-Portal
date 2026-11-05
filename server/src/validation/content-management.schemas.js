@@ -91,27 +91,29 @@ export const heroPatchSchema = z.object({
 export const videoListQuerySchema = z.object({
   ...pageQuery,
   status: z.enum(['draft', 'published']).optional(),
-  provider: z.enum(['youtube', 'vimeo']).optional()
+  category: z.enum([
+    'Events',
+    'Startup Stories',
+    'Interviews',
+    'Founder Stories',
+    'Industry Insights',
+    'Innovation',
+    'Ecosystem Updates'
+  ]).optional(),
+  featured: z.enum(['true', 'false']).transform((value) => value === 'true').optional()
 }).strict();
 
 const videoSource = z.string().trim().url().max(2048).refine((value) => {
   const parsed = new URL(value);
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false;
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) return false;
   const host = parsed.hostname.toLowerCase();
   if (host === 'youtu.be') return /^\/[A-Za-z0-9_-]{11}\/?$/.test(parsed.pathname);
-  if (['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtube-nocookie.com', 'www.youtube-nocookie.com'].includes(host)) {
-    const id = parsed.searchParams.get('v');
-    return Boolean(
-      (id && /^[A-Za-z0-9_-]{11}$/.test(id))
-      || /^\/(?:embed|shorts)\/[A-Za-z0-9_-]{11}\/?$/.test(parsed.pathname)
-    );
+  if (['youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(host)) {
+    if (parsed.pathname === '/watch') return /^[A-Za-z0-9_-]{11}$/.test(parsed.searchParams.get('v') ?? '');
+    return /^\/(?:embed|shorts)\/[A-Za-z0-9_-]{11}\/?$/.test(parsed.pathname);
   }
-  if (host === 'vimeo.com' || host === 'www.vimeo.com') {
-    return /^\/\d{5,12}\/?$/.test(parsed.pathname);
-  }
-  if (host === 'player.vimeo.com') return /^\/video\/\d{5,12}\/?$/.test(parsed.pathname);
   return false;
-}, 'Use a valid HTTPS YouTube or Vimeo video URL.');
+}, 'Use a valid HTTPS YouTube video URL.');
 
 const videoFields = {
   title: z.string().trim().min(1).max(255),
@@ -119,14 +121,26 @@ const videoFields = {
   source_url: videoSource,
   thumbnail_url: httpsUrl.nullable().optional(),
   thumbnail_alt: z.string().trim().max(255).nullable().optional(),
-  category: z.string().trim().max(100).nullable().optional(),
+  category: z.enum([
+    'Events',
+    'Startup Stories',
+    'Interviews',
+    'Founder Stories',
+    'Industry Insights',
+    'Innovation',
+    'Ecosystem Updates'
+  ]),
+  is_featured: z.boolean().default(false),
   display_order: z.number().int().min(0).max(100000),
   status: z.enum(['draft', 'published']).default('draft')
 };
 
 export const videoCreateSchema = z.object(videoFields).strict();
 export const videoPatchSchema = z.object({
-  ...Object.fromEntries(Object.entries(videoFields).map(([key, schema]) => [key, schema.optional()]))
+  ...Object.fromEntries(Object.entries(videoFields).map(([key, schema]) => [
+    key,
+    key === 'is_featured' ? schema.optional() : schema.optional()
+  ]))
 }).strict().refine((value) => Object.keys(value).length > 0, {
   message: 'Provide at least one field to update.'
 });

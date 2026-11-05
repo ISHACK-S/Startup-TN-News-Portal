@@ -12,6 +12,16 @@ export async function deleteAdminSessions(database, adminId) {
   return result.affectedRows;
 }
 
+export async function deleteOtherAdminSessions(database, adminId, sessionId) {
+  const [result] = await database.execute(
+    `DELETE FROM admin_sessions
+     WHERE JSON_UNQUOTE(JSON_EXTRACT(session_data, '$.adminId')) = ?
+       AND session_id <> ?`,
+    [String(adminId), sessionId]
+  );
+  return result.affectedRows;
+}
+
 export class MySqlSessionStore extends session.Store {
   constructor(database) {
     super();

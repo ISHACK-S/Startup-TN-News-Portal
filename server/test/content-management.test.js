@@ -10,6 +10,10 @@ import {
   createHeroSlide,
   createVideo,
   createWebStory,
+  getFeaturedVideo,
+  getPublicVideo,
+  listVideos,
+  parseYouTubeVideo,
   registerMediaAsset,
   updateHeroSlide,
   updateVideo,
@@ -35,13 +39,40 @@ describe('content management validation', () => {
     const base = {
       title: 'Founder interview',
       source_url: 'https://youtu.be/abcdefghijk',
+      category: 'Interviews',
       display_order: 0,
       status: 'draft'
     };
     assert.equal(videoCreateSchema.safeParse(base).success, true);
     assert.equal(videoCreateSchema.safeParse({ ...base, source_url: 'https://example.com/embed/unsafe' }).success, false);
     assert.equal(videoCreateSchema.safeParse({ ...base, source_url: 'http://youtu.be/abcdefghijk' }).success, false);
+    assert.equal(videoCreateSchema.safeParse({ ...base, source_url: 'https://vimeo.com/1234567' }).success, false);
+    assert.equal(videoCreateSchema.safeParse({ ...base, category: 'Public Services' }).success, false);
     assert.equal(videoCreateSchema.safeParse({ ...base, iframe: '<iframe>' }).success, false);
+    for (const source_url of [
+      'https://www.youtube.com/watch?v=abcdefghijk',
+      'https://www.youtube.com/shorts/abcdefghijk',
+      'https://www.youtube.com/embed/abcdefghijk',
+      'https://youtu.be/abcdefghijk'
+    ]) assert.equal(videoCreateSchema.safeParse({ ...base, source_url }).success, true);
+  });
+
+  it('accepts supported YouTube URL forms and rejects lookalike domains', () => {
+    for (const sourceUrl of [
+      'https://youtu.be/abcdefghijk',
+      'https://youtube.com/watch?v=abcdefghijk',
+      'https://www.youtube.com/shorts/abcdefghijk',
+      'https://m.youtube.com/embed/abcdefghijk'
+    ]) {
+      assert.equal(parseYouTubeVideo(sourceUrl).embed_url, 'https://www.youtube-nocookie.com/embed/abcdefghijk?rel=0');
+    }
+    for (const sourceUrl of [
+      'https://youtube.com.evil.example/watch?v=abcdefghijk',
+      'https://www.youtube.com.evil.example/embed/abcdefghijk',
+      'https://user@youtube.com/watch?v=abcdefghijk',
+      'https://youtube.com:444/watch?v=abcdefghijk',
+      'https://vimeo.com/1234567'
+    ]) assert.throws(() => parseYouTubeVideo(sourceUrl), /YouTube/);
   });
 
   it('rejects hero creation and patch values that specify two destinations', () => {
@@ -241,12 +272,14 @@ describe('media registry and video persistence', () => {
     const state = { video: null };
     const database = {
       async execute(sql, values = []) {
+        if (sql.startsWith('SELECT id FROM media_videos WHERE provider')) return [[]];
         if (sql.startsWith('INSERT INTO media_videos')) {
           state.video = {
             id: 5, title: values[0], description: values[1], source_url: values[2],
             provider: values[3], embed_id: values[4], thumbnail_url: values[5],
-            thumbnail_alt: values[6], category: values[7], display_order: values[8],
-            status: values[9], published_at: values[11], created_at: new Date(), updated_at: new Date()
+            thumbnail_alt: values[6], category: values[7], is_featured: values[8],
+            display_order: values[9], status: values[10], published_at: values[12],
+            created_at: new Date(), updated_at: new Date()
           };
           return [{ insertId: state.video.id }];
         }
@@ -267,14 +300,50 @@ describe('media registry and video persistence', () => {
     const created = await createVideo({
       title: 'Founder conversation',
       source_url: 'https://www.youtube.com/watch?v=abcdefghijk',
+      category: 'Interviews',
+      is_featured: true,
       display_order: 0,
       status: 'draft'
     }, 3, database);
     assert.equal(created.provider, 'youtube');
-    assert.equal(created.embed_url, 'https://www.youtube-nocookie.com/embed/abcdefghijk');
+    assert.equal(created.embed_url, 'https://www.youtube-nocookie.com/embed/abcdefghijk?rel=0');
+    assert.equal(created.thumbnail_url, 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg');
+    assert.equal(created.is_featured, true);
 
-    const updated = await updateVideo(5, { source_url: 'https://vimeo.com/1234567' }, database);
-    assert.equal(updated.provider, 'vimeo');
-    assert.equal(updated.embed_url, 'https://player.vimeo.com/video/1234567');
+    const updated = await updateVideo(5, { source_url: 'https://www.youtube.com/shorts/zyxwvutsrq1' }, database);
+    assert.equal(updated.provider, 'youtube');
+    assert.equal(updated.embed_url, 'https://www.youtube-nocookie.com/embed/zyxwvutsrq1?rel=0');
+  });
+
+  it('returns only published YouTube videos from public queries and resolves a featured published record', async () => {
+    const statements = [];
+    const video = {
+      id: 8,
+      title: 'Founder story',
+      source_url: 'https://youtu.be/abcdefghijk',
+      provider: 'youtube',
+      embed_id: 'abcdefghijk',
+      status: 'published',
+      is_featured: 1,
+      published_at: new Date(),
+      thumbnail_url: null
+    };
+    const database = {
+      async execute(sql) {
+        statements.push(sql);
+        if (sql.startsWith('SELECT COUNT(*) AS total FROM media_videos')) return [[{ total: 1 }]];
+        if (sql.includes('ORDER BY published_at DESC')) return [[video]];
+        if (sql.startsWith('SELECT id, title, description, source_url')) return [[video]];
+        throw new Error(`Unexpected public video query: ${sql}`);
+      }
+    };
+    const result = await listVideos({ page: 1, limit: 3 }, database, { publicOnly: true });
+    assert.equal(result.data.length, 1);
+    assert.match(statements[0], /provider = 'youtube'/);
+    assert.match(statements[0], /status = 'published'/);
+    assert.equal(statements.some((sql) => sql.includes('SUM(status')), false);
+    assert.equal((await getPublicVideo(8, database)).id, 8);
+    assert.equal((await getFeaturedVideo(database)).id, 8);
+    assert.match(statements.at(-1), /is_featured = 1 AND status = 'published'/);
   });
 });

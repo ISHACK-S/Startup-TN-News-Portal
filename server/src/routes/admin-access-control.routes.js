@@ -15,19 +15,21 @@ import {
 
 export const adminAccessControlRouter = Router();
 
-adminAccessControlRouter.use(requireSuperAdmin);
 adminAccessControlRouter.post(
   '/users',
+  requireSuperAdmin,
   validate(adminAccountCreateSchema),
   createAdminAccountController
 );
 adminAccessControlRouter.get(
   '/users',
+  requireSuperAdmin,
   validate(adminAccountsQuerySchema, 'query'),
   listAdminAccountsController
 );
 adminAccessControlRouter.patch(
   '/users/:id',
+  requireSuperAdmin,
   validate(adminAccountParamsSchema, 'params'),
   validate(adminAccountUpdateSchema),
   updateAdminAccountController

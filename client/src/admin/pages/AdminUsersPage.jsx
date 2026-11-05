@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createAdminUser,
@@ -11,6 +12,7 @@ import { AdminEmpty, AdminError, AdminLoading, ConfirmDialog } from '../componen
 const PAGE_SIZE = 10;
 
 export default function AdminUsersPage() {
+  const { t: tI18n } = useTranslation('admin');
   const { admin } = useAdminAuth();
   const [accounts, setAccounts] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: PAGE_SIZE, total: 0, totalPages: 0 });
@@ -26,8 +28,9 @@ export default function AdminUsersPage() {
   const [saving, setSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createRoles, setCreateRoles] = useState([]);
-  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesLoading, setRolesLoading] = useState(true);
   const [rolesError, setRolesError] = useState('');
+  const [accountRoles, setAccountRoles] = useState([]);
   const [createValues, setCreateValues] = useState({
     name: '',
     email: '',
@@ -48,7 +51,7 @@ export default function AdminUsersPage() {
 
   const loadAccounts = useCallback(async (signal) => {
     setLoading(true);
-    setError('');
+    setError("");
     try {
       const result = await getAdminUsers({
         page,
@@ -73,6 +76,23 @@ export default function AdminUsersPage() {
   }, [attempt, loadAccounts]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    getPermissionRoles({ signal: controller.signal })
+      .then((roles) => {
+        setAccountRoles(roles);
+        setCreateRoles(roles);
+        setRolesError('');
+      })
+      .catch((loadError) => {
+        if (loadError.name !== 'AbortError') setRolesError(loadError.message);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRolesLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     if (createOpen) {
       wasCreateOpenRef.current = true;
       if (!rolesLoading && !rolesError) nameInputRef.current?.focus();
@@ -90,10 +110,13 @@ export default function AdminUsersPage() {
     setCreateError('');
     try {
       const roles = await getPermissionRoles();
-      setCreateRoles(roles);
+      setAccountRoles(roles);
+      setCreateRoles(roles.filter((role) => role.isActive));
       setCreateValues((current) => ({
         ...current,
-        role: roles.find((role) => role.role === 'Admin')?.role ?? roles[0]?.role ?? ''
+        role: roles.find((role) => role.role === 'Admin' && role.isActive)?.role
+          ?? roles.find((role) => role.isActive)?.role
+          ?? ''
       }));
     } catch (loadError) {
       setRolesError(loadError.message);
@@ -127,7 +150,9 @@ export default function AdminUsersPage() {
     else if (createValues.password !== createValues.passwordConfirmation) {
       errors.passwordConfirmation = 'The passwords do not match.';
     }
-    if (!createRoles.some((role) => role.role === createValues.role)) errors.role = 'Select a supported role.';
+    if (!createRoles.some((role) => role.role === createValues.role && role.isActive)) {
+      errors.role = 'Select an active role.';
+    }
     if (createValues.role === 'Super Admin' && !createValues.confirmSuperAdmin) {
       errors.confirmSuperAdmin = 'Confirm the elevated Super Admin role.';
     }
@@ -140,7 +165,7 @@ export default function AdminUsersPage() {
     if (creating || !validateCreateForm()) return;
     setCreating(true);
     setCreateError('');
-    setNotice('');
+    setNotice("");
     try {
       const created = await createAdminUser({
         name: createValues.name.trim(),
@@ -211,8 +236,8 @@ export default function AdminUsersPage() {
   async function confirmChange() {
     if (!pendingChange || saving) return;
     setSaving(true);
-    setError('');
-    setNotice('');
+    setError("");
+    setNotice("");
     try {
       const result = await updateAdminUser(pendingChange.account.id, pendingChange.changes);
       setAccounts((current) => current.map((account) =>
@@ -238,12 +263,12 @@ export default function AdminUsersPage() {
     <div className="admin-page admin-users-page">
       <div className="admin-page-heading admin-users-heading">
         <div>
-          <span className="admin-eyebrow">Privileged workspace</span>
-          <h1>User Management</h1>
-          <p>Manage administrator access, roles, and account status.</p>
+          <span className="admin-eyebrow">{tI18n("Privileged workspace", { defaultValue: "Privileged workspace" })}</span>
+          <h1>{tI18n("User Management", { defaultValue: "User Management" })}</h1>
+          <p>{tI18n("Manage administrator access, roles, and account status.", { defaultValue: "Manage administrator access, roles, and account status." })}</p>
         </div>
         <div className="admin-users-summary">
-          <span>Administrator accounts</span>
+          <span>{tI18n("Administrator accounts", { defaultValue: "Administrator accounts" })}</span>
           <strong>{pagination.total}</strong>
         </div>
       </div>
@@ -254,20 +279,20 @@ export default function AdminUsersPage() {
       <section className="admin-panel admin-users-panel">
         <div className="admin-panel-heading admin-users-panel-heading">
           <div>
-            <span className="admin-eyebrow">Access control</span>
-            <h2>Administrator accounts</h2>
+            <span className="admin-eyebrow">{tI18n("Access control", { defaultValue: "Access control" })}</span>
+            <h2>{tI18n("Administrator accounts", { defaultValue: "Administrator accounts" })}</h2>
           </div>
           <div className="admin-users-tools">
             <form className="admin-search-form admin-users-search" role="search" onSubmit={submitSearch}>
-              <label className="sr-only" htmlFor="admin-user-search">Search by name or email</label>
+              <label className="sr-only" htmlFor="admin-user-search">{tI18n("Search by name or email", { defaultValue: "Search by name or email" })}</label>
               <input
                 id="admin-user-search"
                 type="search"
-                placeholder="Search name or email"
+                placeholder={tI18n("Search name or email", { defaultValue: "Search name or email" })}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
-              <button type="submit" className="admin-button admin-button--secondary">Search</button>
+              <button type="submit" className="admin-button admin-button--secondary">{tI18n("Search", { defaultValue: "Search" })}</button>
             </form>
             <button
               ref={createButtonRef}
@@ -275,9 +300,7 @@ export default function AdminUsersPage() {
               className="admin-button admin-button--primary"
               disabled={rolesLoading || creating}
               onClick={openCreateForm}
-            >
-              Create Account
-            </button>
+            >{tI18n("Create Account", { defaultValue: "Create Account" })} </button>
           </div>
         </div>
 
@@ -294,11 +317,11 @@ export default function AdminUsersPage() {
               <table className="admin-table admin-users-table">
                 <thead>
                   <tr>
-                    <th scope="col">Administrator</th>
-                    <th scope="col">Role</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Created</th>
-                    <th scope="col">Actions</th>
+                    <th scope="col">{tI18n("Administrator", { defaultValue: "Administrator" })}</th>
+                    <th scope="col">{tI18n("Role", { defaultValue: "Role" })}</th>
+                    <th scope="col">{tI18n("Status", { defaultValue: "Status" })}</th>
+                    <th scope="col">{tI18n("Created", { defaultValue: "Created" })}</th>
+                    <th scope="col">{tI18n("Actions", { defaultValue: "Actions" })}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -325,27 +348,30 @@ export default function AdminUsersPage() {
                         <td className="admin-user-actions-cell" data-label="Actions">
                           <div className="admin-user-actions">
                             <div className="admin-user-role-action">
-                              <label className="sr-only" htmlFor={`role-${account.id}`}>Role for {account.name}</label>
+                              <label className="sr-only" htmlFor={`role-${account.id}`}>{tI18n("Role for", { defaultValue: "Role for" })} {account.name}</label>
                               <select
                                 id={`role-${account.id}`}
                                 value={selectedRole}
-                                disabled={isSelf || saving}
+                                disabled={isSelf || saving || rolesLoading}
                                 onChange={(event) => setRoleDrafts((current) => ({
                                   ...current,
                                   [account.id]: event.target.value
                                 }))}
                               >
-                                <option value="Admin">Admin</option>
-                                <option value="Super Admin">Super Admin</option>
+                                {accountRoles.filter((role) => role.isActive).map((role) => (
+                                  <option key={role.roleKey} value={role.role}>{role.label}</option>
+                                ))}
+                                {accountRoles.some((role) => role.role === account.role && !role.isActive) && (
+                                  <option value={account.role} disabled>
+                                    {account.role} {tI18n("(Inactive)", { defaultValue: "(Inactive)" })} </option>
+                                )}
                               </select>
                               <button
                                 type="button"
                                 className="admin-user-action-link"
                                 disabled={isSelf || saving || selectedRole === account.role}
                                 onClick={() => requestRoleChange(account)}
-                              >
-                                Save role
-                              </button>
+                              >{tI18n("Save role", { defaultValue: "Save role" })} </button>
                             </div>
                             <button
                               type="button"
@@ -355,7 +381,7 @@ export default function AdminUsersPage() {
                             >
                               {account.isActive ? 'Deactivate' : 'Reactivate'}
                             </button>
-                            {isSelf && <span className="admin-user-self-note">Your account</span>}
+                            {isSelf && <span className="admin-user-self-note">{tI18n("Your account", { defaultValue: "Your account" })}</span>}
                           </div>
                         </td>
                       </tr>
@@ -364,12 +390,12 @@ export default function AdminUsersPage() {
                 </tbody>
               </table>
             </div>
-            <nav className="admin-pagination" aria-label="Administrator pages">
-              <span>{pagination.total} accounts</span>
+            <nav className="admin-pagination" aria-label={tI18n("Administrator pages", { defaultValue: "Administrator pages" })}>
+              <span>{pagination.total} {tI18n("accounts", { defaultValue: "accounts" })}</span>
               <div>
-                <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>← Previous</button>
-                <span>Page {page} of {Math.max(pagination.totalPages, 1)}</span>
-                <button type="button" disabled={page >= pagination.totalPages || loading} onClick={() => setPage((value) => value + 1)}>Next →</button>
+                <button type="button" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}>{tI18n("← Previous", { defaultValue: "← Previous" })}</button>
+                <span>{tI18n("Page", { defaultValue: "Page" })} {page} {tI18n("of", { defaultValue: "of" })} {Math.max(pagination.totalPages, 1)}</span>
+                <button type="button" disabled={page >= pagination.totalPages || loading} onClick={() => setPage((value) => value + 1)}>{tI18n("Next →", { defaultValue: "Next →" })}</button>
               </div>
             </nav>
           </>
@@ -421,17 +447,17 @@ export default function AdminUsersPage() {
           >
             <div className="admin-create-account-heading">
               <div>
-                <span className="admin-dialog-kicker">Access control</span>
-                <h2 id="create-account-title">Create administrator account</h2>
-                <p>New accounts inherit permissions from their assigned role.</p>
+                <span className="admin-dialog-kicker">{tI18n("Access control", { defaultValue: "Access control" })}</span>
+                <h2 id="create-account-title">{tI18n("Create administrator account", { defaultValue: "Create administrator account" })}</h2>
+                <p>{tI18n("New accounts inherit permissions from their assigned role.", { defaultValue: "New accounts inherit permissions from their assigned role." })}</p>
               </div>
               <button
                 type="button"
                 className="admin-create-account-close"
-                aria-label="Close create account form"
+                aria-label={tI18n("Close create account form", { defaultValue: "Close create account form" })}
                 disabled={creating}
                 onClick={closeCreateForm}
-              >×</button>
+              >{tI18n("×", { defaultValue: "×" })}</button>
             </div>
             {rolesLoading && <AdminLoading label="Loading available roles…" />}
             {rolesError && (
@@ -443,7 +469,7 @@ export default function AdminUsersPage() {
               <form className="admin-create-account-form" onSubmit={submitCreateForm} noValidate>
                 {createError && <div className="admin-alert admin-alert--error" role="alert">{createError}</div>}
                 <label className="admin-create-field">
-                  <span>Full Name</span>
+                  <span>{tI18n("Full Name", { defaultValue: "Full Name" })}</span>
                   <input
                     ref={nameInputRef}
                     autoComplete="name"
@@ -455,7 +481,7 @@ export default function AdminUsersPage() {
                   {createErrors.name && <small id="create-name-error" role="alert">{createErrors.name}</small>}
                 </label>
                 <label className="admin-create-field">
-                  <span>Email Address</span>
+                  <span>{tI18n("Email Address", { defaultValue: "Email Address" })}</span>
                   <input
                     type="email"
                     autoComplete="email"
@@ -467,11 +493,11 @@ export default function AdminUsersPage() {
                   {createErrors.email && <small id="create-email-error" role="alert">{createErrors.email}</small>}
                 </label>
                 <label className="admin-create-field">
-                  <span>Initial Password</span>
+                  <span>{tI18n("Initial Password", { defaultValue: "Initial Password" })}</span>
                   <span className="admin-create-password-control">
                     <input
                       type={showPassword ? 'text' : 'password'}
-                      aria-label="Initial Password"
+                      aria-label={tI18n("Initial Password", { defaultValue: "Initial Password" })}
                       autoComplete="new-password"
                       value={createValues.password}
                       aria-invalid={Boolean(createErrors.password)}
@@ -495,11 +521,11 @@ export default function AdminUsersPage() {
                   </small>
                 </label>
                 <label className="admin-create-field">
-                  <span>Confirm Password</span>
+                  <span>{tI18n("Confirm Password", { defaultValue: "Confirm Password" })}</span>
                   <span className="admin-create-password-control">
                     <input
                       type={showPasswordConfirmation ? 'text' : 'password'}
-                      aria-label="Confirm Password"
+                      aria-label={tI18n("Confirm Password", { defaultValue: "Confirm Password" })}
                       autoComplete="new-password"
                       value={createValues.passwordConfirmation}
                       aria-invalid={Boolean(createErrors.passwordConfirmation)}
@@ -520,7 +546,7 @@ export default function AdminUsersPage() {
                     && <small id="create-confirm-error" role="alert">{createErrors.passwordConfirmation}</small>}
                 </label>
                 <label className="admin-create-field">
-                  <span>Role</span>
+                  <span>{tI18n("Role", { defaultValue: "Role" })}</span>
                   <select
                     value={createValues.role}
                     aria-invalid={Boolean(createErrors.role)}
@@ -531,7 +557,7 @@ export default function AdminUsersPage() {
                       confirmSuperAdmin: false
                     }))}
                   >
-                    {createRoles.map((role) => (
+                    {createRoles.filter((role) => role.isActive).map((role) => (
                       <option key={role.roleKey} value={role.role}>{role.label}</option>
                     ))}
                   </select>
@@ -550,12 +576,12 @@ export default function AdminUsersPage() {
                         confirmSuperAdmin: event.target.checked
                       }))}
                     />
-                    <span>Confirm this account should receive unrestricted Super Admin authority.</span>
+                    <span>{tI18n("Confirm this account should receive unrestricted Super Admin authority.", { defaultValue: "Confirm this account should receive unrestricted Super Admin authority." })}</span>
                     {createErrors.confirmSuperAdmin && <small role="alert">{createErrors.confirmSuperAdmin}</small>}
                   </label>
                 )}
                 <label className="admin-create-field">
-                  <span>Account Status</span>
+                  <span>{tI18n("Account Status", { defaultValue: "Account Status" })}</span>
                   <select
                     value={createValues.isActive ? 'active' : 'inactive'}
                     onChange={(event) => setCreateValues((current) => ({
@@ -563,8 +589,8 @@ export default function AdminUsersPage() {
                       isActive: event.target.value === 'active'
                     }))}
                   >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
+                    <option value="active">{tI18n("Active", { defaultValue: "Active" })}</option>
+                    <option value="inactive">{tI18n("Inactive", { defaultValue: "Inactive" })}</option>
                   </select>
                 </label>
                 <div className="admin-dialog-actions">
@@ -573,7 +599,7 @@ export default function AdminUsersPage() {
                     className="admin-button admin-button--secondary"
                     disabled={creating}
                     onClick={closeCreateForm}
-                  >Cancel</button>
+                  >{tI18n("Cancel", { defaultValue: "Cancel" })}</button>
                   <button
                     type="submit"
                     className="admin-button admin-button--primary"

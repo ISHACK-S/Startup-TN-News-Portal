@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { render } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import ArticleContent from './ArticleContent.jsx';
 import { isAllowedInlineImageUrl } from '../utils/article-content.js';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const imageUrl = (name) => `https://res.cloudinary.com/startuptn/image/upload/articles/${name}.png`;
 
@@ -90,5 +92,28 @@ describe('ArticleContent', () => {
 
     expect(container.querySelector('img')).not.toBeInTheDocument();
     expect(container).toHaveTextContent('<img src=x onerror="alert(1)">');
+  });
+
+  it('renders only a managed published video reference as an embedded player', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          id: 42,
+          title: 'Founder interview',
+          thumbnail_url: 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg',
+          embed_url: 'https://www.youtube-nocookie.com/embed/abcdefghijk?rel=0',
+          watch_url: 'https://www.youtube.com/watch?v=abcdefghijk'
+        }
+      })
+    }));
+    const { container } = render(<ArticleContent content={'Before.\n\n{{video:42}}\n\nAfter.'} />);
+
+    await waitFor(() => expect(container.querySelector('.youtube-player-poster')).toBeInTheDocument());
+    expect(container.firstElementChild.children[0]).toHaveTextContent('Before.');
+    expect(container.firstElementChild.children[2]).toHaveTextContent('After.');
+    expect(container.querySelector('iframe')).not.toBeInTheDocument();
+    fireEvent.click(container.querySelector('.youtube-player-poster'));
+    expect(container.querySelector('iframe')).toHaveAttribute('src', 'https://www.youtube-nocookie.com/embed/abcdefghijk?rel=0');
   });
 });

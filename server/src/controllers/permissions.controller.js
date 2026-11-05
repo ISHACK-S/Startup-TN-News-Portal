@@ -1,12 +1,16 @@
 import { asyncHandler } from '../middleware/async-handler.js';
 import {
   getAccountPermissions,
+  createCustomRole,
+  deleteCustomRole,
+  getRoleDetails,
   getRolePermissions,
   listPermissionModules,
   listPermissionRoles,
   removeAccountPermissionOverride,
   updateAccountPermissionOverrides,
   updateModuleActivation,
+  updateCustomRole,
   updateRolePermissions
 } from '../services/permissions.service.js';
 
@@ -29,6 +33,40 @@ export const listPermissionModulesController = asyncHandler(async (request, resp
 
 export const listPermissionRolesController = asyncHandler(async (request, response) => {
   response.status(200).json({ data: await listPermissionRoles(request.app.locals.database) });
+});
+
+export const createCustomRoleController = asyncHandler(async (request, response) => {
+  const result = await withConnection(request, (connection) => createCustomRole(
+    connection,
+    request.admin.id,
+    request.validated.body
+  ));
+  response.status(201).json({ data: result });
+});
+
+export const getRoleDetailsController = asyncHandler(async (request, response) => {
+  response.status(200).json({
+    data: await getRoleDetails(request.validated.params.roleKey, request.app.locals.database)
+  });
+});
+
+export const updateCustomRoleController = asyncHandler(async (request, response) => {
+  const result = await withConnection(request, (connection) => updateCustomRole(
+    connection,
+    request.admin.id,
+    request.validated.params.roleKey,
+    request.validated.body
+  ));
+  response.status(200).json({ data: result });
+});
+
+export const deleteCustomRoleController = asyncHandler(async (request, response) => {
+  const result = await withConnection(request, (connection) => deleteCustomRole(
+    connection,
+    request.admin.id,
+    request.validated.params.roleKey
+  ));
+  response.status(200).json({ data: result });
 });
 
 export const getCurrentAdminPermissionsController = asyncHandler(async (request, response) => {

@@ -1,0 +1,22 @@
+CREATE TABLE admin_activity_logs (
+  activity_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  actor_admin_id BIGINT UNSIGNED NULL,
+  actor_name VARCHAR(150) NULL,
+  actor_email VARCHAR(254) NULL,
+  actor_role VARCHAR(100) NULL,
+  action_type VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  module_id VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  description VARCHAR(255) NOT NULL,
+  record_id VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  occurred_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  status ENUM('success', 'failure') NOT NULL,
+  changes JSON NULL,
+  correlation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+  PRIMARY KEY (activity_id),
+  KEY idx_admin_activity_correlation (correlation_id),
+  KEY idx_admin_activity_actor_time (actor_admin_id, occurred_at),
+  KEY idx_admin_activity_role_time (actor_role, occurred_at),
+  KEY idx_admin_activity_module_time (module_id, occurred_at),
+  KEY idx_admin_activity_action_time (action_type, occurred_at),
+  KEY idx_admin_activity_time (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

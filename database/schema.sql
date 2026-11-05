@@ -3,13 +3,14 @@ CREATE TABLE IF NOT EXISTS admins (
   name VARCHAR(150) NOT NULL,
   email VARCHAR(254) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('Admin', 'Super Admin') NOT NULL DEFAULT 'Admin',
+  role VARCHAR(100) NOT NULL DEFAULT 'Admin',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   auth_version INT UNSIGNED NOT NULL DEFAULT 0,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_admins_email (email)
+  UNIQUE KEY uq_admins_email (email),
+  KEY idx_admins_role (role)
 ) ENGINE=InnoDB
   DEFAULT CHARACTER SET=utf8mb4
   COLLATE=utf8mb4_0900_ai_ci;

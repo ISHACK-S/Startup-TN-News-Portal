@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
@@ -10,6 +11,7 @@ export default function StoryImage({
   priority = false,
   articleSlug
 }) {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   const [failed, setFailed] = useState(false);
   const [preserveFullImage, setPreserveFullImage] = useState(false);
@@ -17,8 +19,8 @@ export default function StoryImage({
   if (!src || failed) {
     return (
       <div className={`story-image-fallback ${className}`} role="img" aria-label={alt || t('Image unavailable')}>
-        <span aria-hidden="true">StartupTN</span>
-        <small>Stories shaping tomorrow</small>
+        <span aria-hidden="true">{tI18n("StartupTN", { defaultValue: "StartupTN" })}</span>
+        <small>{tI18n("Stories shaping tomorrow", { defaultValue: "Stories shaping tomorrow" })}</small>
       </div>
     );
   }

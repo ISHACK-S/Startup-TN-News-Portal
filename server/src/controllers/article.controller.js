@@ -48,15 +48,73 @@ export const createArticleController = asyncHandler(async (request, response) =>
     request.session.adminId,
     request.app.locals.database
   );
+  request.activityChanges = {
+    after: {
+      status: article.status,
+      categoryId: article.category_id,
+      isFeatured: Number(article.is_featured) === 1
+    }
+  };
+  if (article.status === 'published') request.activityAction = 'article.published';
   response.status(201).json({ data: article });
 });
 
 export const updateArticleController = asyncHandler(async (request, response) => {
+  const before = await getAdminArticle(request.validated.body.id, request.app.locals.database);
   const article = await updateArticle(request.validated.body, request.app.locals.database);
+  const beforeSnapshot = {
+    title: before.title,
+    slug: before.slug,
+    status: before.status,
+    categoryId: before.category_id,
+    isFeatured: Number(before.is_featured) === 1
+  };
+  const afterSnapshot = {
+    title: article.title,
+    slug: article.slug,
+    status: article.status,
+    categoryId: article.category_id,
+    isFeatured: Number(article.is_featured) === 1
+  };
+  const updatedFields = Object.keys(request.validated.body).filter((key) => {
+    if (key === 'id') return false;
+    const previous = before[key];
+    const next = request.validated.body[key];
+    if (key === 'is_featured') return Boolean(Number(previous)) !== next;
+    return String(previous ?? '') !== String(next ?? '');
+  });
+  request.activityChanged = updatedFields.length > 0;
+  if (request.activityChanged) {
+    const trackedFields = Object.keys(beforeSnapshot).filter((key) => (
+      String(beforeSnapshot[key]) !== String(afterSnapshot[key])
+    ));
+    request.activityChanges = {
+      before: Object.fromEntries(trackedFields.map((key) => [key, beforeSnapshot[key]])),
+      after: Object.fromEntries(trackedFields.map((key) => [key, afterSnapshot[key]])),
+      changedFields: updatedFields
+    };
+    if (before.status !== article.status && article.status === 'published') {
+      request.activityAction = 'article.published';
+    } else if (before.status !== article.status && article.status === 'draft') {
+      request.activityAction = 'article.unpublished';
+    } else {
+      request.activityAction = 'article.edited';
+    }
+  }
   response.status(200).json({ data: article });
 });
 
 export const deleteArticleController = asyncHandler(async (request, response) => {
+  const before = await getAdminArticle(request.validated.body.id, request.app.locals.database);
   await deleteArticle(request.validated.body.id, request.app.locals.database);
+  request.activityChanges = {
+    before: {
+      title: before.title,
+      slug: before.slug,
+      status: before.status,
+      categoryId: before.category_id,
+      isFeatured: Number(before.is_featured) === 1
+    }
+  };
   response.status(200).json({ data: { deleted: true } });
 });

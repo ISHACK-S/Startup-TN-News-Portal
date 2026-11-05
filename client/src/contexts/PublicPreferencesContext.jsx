@@ -1,139 +1,26 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { getPublicWebsiteConfiguration } from '../api/news.js';
+import i18n from '../i18n/index.js';
+import {
+  DEFAULT_PUBLIC_WEBSITE_CONFIGURATION,
+  normalizePublicWebsiteConfiguration
+} from '../config/public-site-defaults.js';
 
 const STORAGE_KEY = 'startuptn-public-preferences';
 const FONT_SCALES = [0.85, 0.925, 1, 1.075, 1.15, 1.225, 1.3];
-const DEFAULT_PREFERENCES = { fontIndex: 2, highContrast: false, language: 'en' };
+const DEFAULT_PREFERENCES = { fontIndex: 2, highContrast: false };
 const PublicPreferencesContext = createContext({
   fontIndex: DEFAULT_PREFERENCES.fontIndex,
   highContrast: false,
   language: 'en',
   fontScale: 1,
   translate: (text) => text,
+  siteConfiguration: DEFAULT_PUBLIC_WEBSITE_CONFIGURATION,
+  configurationLoading: false,
   changeFontSize: () => {},
-  setLanguage: () => {},
   toggleContrast: () => {}
 });
-
-const translations = {
-  'en': {},
-  'ta': {
-    'Skip to main content': 'முக்கிய உள்ளடக்கத்திற்குச் செல்க',
-    'Stories from the Tamil Nadu startup ecosystem': 'தமிழ்நாடு தொடக்க நிறுவனச் சூழலின் செய்திகள்',
-    'TAMIL NADU’S STARTUP & BUSINESS DESK': 'தமிழ்நாடு தொடக்க நிறுவனங்கள் மற்றும் வணிகச் செய்திப் பிரிவு',
-    'A closer look at what’s next': 'அடுத்தகட்ட வளர்ச்சிகளைப் பாருங்கள்',
-    'Accessibility controls': 'அணுகல்தன்மைக் கட்டுப்பாடுகள்',
-    'Decrease text size': 'எழுத்து அளவைக் குறைக்கவும்',
-    'Reset text size': 'இயல்பான எழுத்து அளவு',
-    'Increase text size': 'எழுத்து அளவை அதிகரிக்கவும்',
-    'Contrast': 'மாறுபாடு',
-    'High contrast mode': 'உயர் மாறுபாட்டுப் பயன்முறை',
-    'Language': 'மொழி',
-    'Home': 'முகப்பு',
-    'Latest news': 'சமீபத்திய செய்திகள்',
-    'Latest': 'சமீபத்திய',
-    'news.': 'செய்திகள்.',
-    'Startups': 'தொடக்க நிறுவனங்கள்',
-    'Funding': 'நிதி',
-    'Events': 'நிகழ்வுகள்',
-    'Policy': 'கொள்கை',
-    'Innovation': 'புதுமை',
-    'Ecosystem': 'சூழல்',
-    'Main navigation': 'முதன்மை வழிசெலுத்தல்',
-    'Search news': 'செய்திகளைத் தேடுக',
-    'Search news stories...': 'செய்திகளைத் தேடுக...',
-    'Search': 'தேடுக',
-    'Image unavailable': 'படம் கிடைக்கவில்லை',
-    'Close navigation menu': 'வழிசெலுத்தல் பட்டியை மூடுக',
-    'Open navigation menu': 'வழிசெலுத்தல் பட்டியைத் திறக்கவும்',
-    'Featured story': 'சிறப்புச் செய்தி',
-    'Read the story': 'செய்தியைப் படிக்கவும்',
-    'The newsroom': 'செய்தியகம்',
-    'More headlines': 'மேலும் தலைப்புச் செய்திகள்',
-    'More headlines list': 'மேலும் தலைப்புச் செய்திகளின் பட்டியல்',
-    'Recent headlines': 'சமீபத்திய தலைப்புச் செய்திகள்',
-    'All news': 'அனைத்துச் செய்திகள்',
-    'Browse all latest headlines': 'அனைத்து சமீபத்திய தலைப்புச் செய்திகளையும் காண்க',
-    'Browse all latest news': 'அனைத்து சமீபத்திய செய்திகளையும் காண்க',
-    'Published stories from the Tamil Nadu startup ecosystem.': 'தமிழ்நாடு தொடக்க நிறுவனச் சூழலில் வெளியான செய்திகள்.',
-    'New reporting and updates': 'புதிய செய்திகள் மற்றும் புதுப்பிப்புகள்',
-    'All stories': 'அனைத்துச் செய்திகள்',
-    'Browse all stories': 'அனைத்துச் செய்திகளையும் காண்க',
-    'Featured picks from the newsroom': 'செய்தியகத்தின் சிறப்புத் தேர்வுகள்',
-    'Featured stories': 'சிறப்புச் செய்திகள்',
-    'Latest by category': 'பிரிவுவாரியான சமீபத்திய செய்திகள்',
-    'From the ecosystem': 'சூழலிலிருந்து',
-    'More': 'மேலும்',
-    'More reporting from the ecosystem will appear here as it is published.': 'சூழல் தொடர்பான புதிய செய்திகள் வெளியிடப்படும்போது இங்கே இடம்பெறும்.',
-    'The published stories above are the latest from the newsroom.': 'மேலே உள்ள செய்திகள் செய்தியகத்தின் சமீபத்திய வெளியீடுகள்.',
-    'The story': 'செய்தி',
-    'Source:': 'மூலம்:',
-    'Share this story': 'இந்தச் செய்தியைப் பகிரவும்',
-    'Share on Facebook': 'Facebook-இல் பகிரவும்',
-    'Share on LinkedIn': 'LinkedIn-இல் பகிரவும்',
-    'Share on X': 'X-இல் பகிரவும்',
-    'Share by email': 'மின்னஞ்சலில் பகிரவும்',
-    'Explore the newsroom': 'செய்தியகத்தைப் பார்வையிடவும்',
-    'Find a story': 'செய்தியைத் தேடுக',
-    'About this story': 'இந்தச் செய்தியைப் பற்றி',
-    'Published': 'வெளியிடப்பட்டது',
-    'Written by': 'எழுதியவர்',
-    'Reading time': 'வாசிப்பு நேரம்',
-    'Section': 'பிரிவு',
-    'View original source': 'அசல் மூலத்தைப் பார்க்கவும்',
-    'Fresh from the desk': 'செய்தியகத்தின் புதிய செய்திகள்',
-    'Recent stories': 'சமீபத்திய செய்திகள்',
-    'Browse all recent stories': 'அனைத்து சமீபத்திய செய்திகளையும் காண்க',
-    'Recent stories are temporarily unavailable.': 'சமீபத்திய செய்திகள் தற்காலிகமாகக் கிடைக்கவில்லை.',
-    'More reporting from the newsroom will appear here soon.': 'செய்தியகத்தின் மேலும் செய்திகள் விரைவில் இங்கே இடம்பெறும்.',
-    'Continue exploring': 'தொடர்ந்து பார்வையிடுங்கள்',
-    'The details': 'விவரங்கள்',
-    'More from the newsroom': 'செய்தியகத்திலிருந்து மேலும்',
-    'Filter by category': 'பிரிவின்படி வடிகட்டுக',
-    'News': 'செய்திகள்',
-    'Breadcrumb': 'வழிசெலுத்தல் பாதை',
-    'Back to latest news': 'சமீபத்திய செய்திகளுக்குத் திரும்பவும்',
-    'Article reading progress': 'செய்தி வாசிப்பு முன்னேற்றம்',
-    'min': 'நிமிடம்',
-    'Read story': 'செய்தியைப் படிக்கவும்',
-    'This story may have moved, or is no longer available.': 'இந்தச் செய்தி மாற்றப்பட்டிருக்கலாம் அல்லது இனி கிடைக்காமல் இருக்கலாம்.',
-    'Search by headline or summary': 'தலைப்பு அல்லது சுருக்கத்தைத் தேடுக',
-    'Search headlines and summaries': 'தலைப்புகள் மற்றும் சுருக்கங்களைத் தேடுக',
-    'Reporting, perspectives and updates from across Tamil Nadu’s startup ecosystem.': 'தமிழ்நாட்டின் தொடக்க நிறுவனச் சூழல் குறித்த செய்திகள், பார்வைகள் மற்றும் புதுப்பிப்புகள்.',
-    'Results for': 'இதற்கான முடிவுகள்',
-    'in': 'இல்',
-    'Page': 'பக்கம்',
-    'of': '/',
-    'Categories are temporarily unavailable. You can still search all published stories.': 'பிரிவுகள் தற்காலிகமாகக் கிடைக்கவில்லை. வெளியிடப்பட்ட செய்திகளைத் தொடர்ந்து தேடலாம்.',
-    'No stories match those filters.': 'இந்த வடிகட்டிகளுக்கு ஏற்ற செய்திகள் இல்லை.',
-    'The newsroom is getting ready.': 'செய்தியகம் தயாராகி வருகிறது.',
-    'Try a different search or select another category.': 'வேறு தேடலை முயற்சிக்கவும் அல்லது வேறு பிரிவைத் தேர்ந்தெடுக்கவும்.',
-    'No articles have been published yet. Please check back soon.': 'இதுவரை செய்திகள் வெளியிடப்படவில்லை. விரைவில் மீண்டும் பார்க்கவும்.',
-    'There are no published stories just yet. Check back soon for verified news and updates from Tamil Nadu’s startup ecosystem.': 'இப்போதைக்கு வெளியிடப்பட்ட செய்திகள் இல்லை. தமிழ்நாட்டின் தொடக்க நிறுவனச் சூழலின் சரிபார்க்கப்பட்ட செய்திகள் மற்றும் புதுப்பிப்புகளுக்கு விரைவில் மீண்டும் பார்க்கவும்.',
-    'Previous': 'முந்தையது',
-    'Next': 'அடுத்தது',
-    'News pages': 'செய்திப் பக்கங்கள்',
-    'A small pause': 'சிறிய இடைவேளை',
-    'We couldn’t load the news.': 'செய்திகளை ஏற்ற முடியவில்லை.',
-    'Please check your connection and try again.': 'இணைப்பைச் சரிபார்த்து மீண்டும் முயற்சிக்கவும்.',
-    'Try again': 'மீண்டும் முயற்சிக்கவும்',
-    'No stories found': 'செய்திகள் எதுவும் இல்லை',
-    'Try another search or category.': 'வேறு தேடல் அல்லது பிரிவை முயற்சிக்கவும்.',
-    'Loading news': 'செய்திகள் ஏற்றப்படுகின்றன',
-    'Loading article': 'செய்தி ஏற்றப்படுகிறது',
-    'No published stories': 'வெளியிடப்பட்ட செய்திகள் இல்லை',
-    'Explore': 'பார்வையிடுக',
-    'Independent stories and perspectives from across Tamil Nadu’s startup ecosystem.': 'தமிழ்நாட்டின் தொடக்க நிறுவனச் சூழல் குறித்த சுயாதீனச் செய்திகள் மற்றும் பார்வைகள்.',
-    'Independent editorial project · Not an official StartupTN publication': 'சுயாதீனச் செய்தித் திட்டம் · அதிகாரப்பூர்வ StartupTN வெளியீடு அல்ல',
-    'Back to top': 'மேலே செல்லவும்',
-    'Return to the front page': 'முகப்புப் பக்கத்திற்குத் திரும்பவும்',
-    'This page is off the record.': 'இந்தப் பக்கம் கிடைக்கவில்லை.',
-    'The story may have moved, or the address might be incomplete.': 'இந்தச் செய்தி மாற்றப்பட்டிருக்கலாம் அல்லது முகவரி முழுமையற்றதாக இருக்கலாம்.',
-    '404 · Story not found': '404 · செய்தி கிடைக்கவில்லை',
-    'By': 'எழுதியவர்',
-    'min read': 'நிமிட வாசிப்பு',
-    'Recently published': 'சமீபத்தில் வெளியிடப்பட்டது'
-  }
-};
 
 function readPreferences() {
   try {
@@ -142,8 +29,7 @@ function readPreferences() {
       fontIndex: Number.isInteger(stored.fontIndex)
         ? Math.max(0, Math.min(FONT_SCALES.length - 1, stored.fontIndex))
         : DEFAULT_PREFERENCES.fontIndex,
-      highContrast: stored.highContrast === true,
-      language: stored.language === 'ta' ? 'ta' : 'en'
+      highContrast: stored.highContrast === true
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -151,21 +37,67 @@ function readPreferences() {
 }
 
 export function PublicPreferencesProvider({ children }) {
+  const { i18n: languageI18n } = useTranslation();
   const [preferences, setPreferences] = useState(readPreferences);
+  const [siteConfiguration, setSiteConfiguration] = useState(() => (
+    normalizePublicWebsiteConfiguration(DEFAULT_PUBLIC_WEBSITE_CONFIGURATION)
+  ));
+  const [configurationError, setConfigurationError] = useState('');
   const fontScale = FONT_SCALES[preferences.fontIndex];
+  const language = languageI18n.resolvedLanguage ?? languageI18n.language;
   const initialDocumentLanguage = useRef(document.documentElement.lang || 'en');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let activeController = controller;
+    getPublicWebsiteConfiguration({ signal: controller.signal })
+      .then((configuration) => {
+        setSiteConfiguration(normalizePublicWebsiteConfiguration(configuration));
+        setConfigurationError('');
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') {
+          console.error('Unable to load public website configuration.', error);
+          setConfigurationError('Public website settings could not be refreshed.');
+        }
+      });
+
+    const refresh = () => {
+      activeController.abort();
+      activeController = new AbortController();
+      getPublicWebsiteConfiguration({ signal: activeController.signal })
+        .then((configuration) => setSiteConfiguration(normalizePublicWebsiteConfiguration(configuration)))
+        .then(() => setConfigurationError(''))
+        .catch((error) => {
+          if (error.name !== 'AbortError') {
+            console.error('Unable to refresh public website configuration.', error);
+            setConfigurationError('Public website settings could not be refreshed.');
+          }
+        });
+    };
+    const handleStorage = (event) => {
+      if (event.key === 'startuptn:site-config-updated') refresh();
+    };
+    window.addEventListener('startuptn:site-config-updated', refresh);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      activeController.abort();
+      window.removeEventListener('startuptn:site-config-updated', refresh);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
-    root.lang = preferences.language;
+    root.lang = language;
     root.dataset.highContrast = String(preferences.highContrast);
     root.style.setProperty('--user-font-scale', String(fontScale));
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...preferences, language }));
     } catch {
       // Preferences remain active for this page session when storage is unavailable.
     }
-  }, [fontScale, preferences]);
+  }, [fontScale, language, preferences]);
 
   useLayoutEffect(() => {
     let active = true;
@@ -218,11 +150,85 @@ export function PublicPreferencesProvider({ children }) {
       });
       delete document.documentElement.dataset.highContrast;
       document.documentElement.style.removeProperty('--user-font-scale');
-      document.documentElement.lang = initialDocumentLanguage.current;
+      document.documentElement.lang = i18n.resolvedLanguage ?? i18n.language ?? initialDocumentLanguage.current;
     };
   }, []);
 
-  const translate = useCallback((text) => translations[preferences.language][text] ?? text, [preferences.language]);
+  useEffect(() => {
+    const { branding } = siteConfiguration;
+    const root = document.querySelector('.public-site');
+    const colorProperties = ['--blue', '--navy', '--blue-deep', '--navy-deep', '--blue-mid', '--gold', '--gold-soft', '--orange', '--orange-dark', '--paper', '--ink', '--serif', '--public-font-family'];
+    const customProperties = ['--public-primary', '--public-secondary', '--public-accent', '--public-background', '--public-text'];
+    const properties = [...colorProperties, ...customProperties];
+    if (root && siteConfiguration.brandingCustomized) {
+      const colors = {
+        '--blue': branding.primaryColor,
+        '--navy': branding.primaryColor,
+        '--blue-deep': branding.secondaryColor,
+        '--navy-deep': branding.secondaryColor,
+        '--blue-mid': `color-mix(in srgb, ${branding.secondaryColor} 82%, white)`,
+        '--gold': branding.accentColor,
+        '--gold-soft': branding.accentColor,
+        '--orange': branding.accentColor,
+        '--orange-dark': branding.secondaryColor,
+        '--public-primary': branding.primaryColor,
+        '--public-secondary': branding.secondaryColor,
+        '--public-accent': branding.accentColor,
+        '--paper': branding.backgroundColor,
+        '--ink': branding.textColor,
+        '--public-background': branding.backgroundColor,
+        '--public-text': branding.textColor,
+        '--public-font-family': branding.fontFamily === 'Trebuchet MS'
+          ? '"Trebuchet MS", sans-serif'
+          : branding.fontFamily === 'Inter'
+            ? 'Inter, "Segoe UI", Arial, sans-serif'
+            : `${branding.fontFamily}, ${branding.fontFamily === 'Georgia' ? 'serif' : 'sans-serif'}`,
+        '--serif': branding.fontFamily === 'Georgia'
+          ? 'Georgia, "Times New Roman", serif'
+          : branding.fontFamily === 'Trebuchet MS'
+            ? '"Trebuchet MS", sans-serif'
+            : branding.fontFamily === 'Arial'
+              ? 'Arial, sans-serif'
+              : 'Georgia, "Times New Roman", serif'
+      };
+      for (const [property, value] of Object.entries(colors)) {
+        if (property.includes('public') || property === '--blue-mid' || property === '--serif' || /^#[0-9a-f]{6}$/i.test(value)) {
+          root.style.setProperty(property, value);
+        }
+      }
+    } else if (root) {
+      properties.forEach((property) => root.style.removeProperty(property));
+    }
+    if (root && !siteConfiguration.brandingCustomized) {
+      ['--paper', '--ink', '--serif', '--public-font-family'].forEach((property) => {
+        root.style.removeProperty(property);
+      });
+    }
+
+    const previousFavicon = document.querySelector('link[rel="icon"]')?.getAttribute('href') ?? null;
+    let favicon;
+    let createdFavicon = false;
+    if (siteConfiguration.brandingCustomized && branding.faviconUrl) {
+      favicon = document.querySelector('link[rel="icon"]');
+      if (!favicon) {
+        favicon = document.createElement('link');
+        favicon.rel = 'icon';
+        document.head.append(favicon);
+        createdFavicon = true;
+      }
+      favicon.href = branding.faviconUrl;
+    }
+    return () => {
+      if (createdFavicon) favicon?.remove();
+      else if (favicon && previousFavicon === null) favicon.removeAttribute('href');
+      else if (favicon && previousFavicon !== null) favicon.href = previousFavicon;
+    };
+  }, [siteConfiguration]);
+
+  const translate = useCallback((text) => i18n.t(text, {
+    ns: 'public',
+    defaultValue: text
+  }), []);
   const changeFontSize = useCallback((direction) => {
     setPreferences((current) => ({
       ...current,
@@ -231,21 +237,20 @@ export function PublicPreferencesProvider({ children }) {
         : Math.max(0, Math.min(FONT_SCALES.length - 1, current.fontIndex + direction))
     }));
   }, []);
-  const setLanguage = useCallback((language) => {
-    setPreferences((current) => ({ ...current, language: language === 'ta' ? 'ta' : 'en' }));
-  }, []);
   const toggleContrast = useCallback(() => {
     setPreferences((current) => ({ ...current, highContrast: !current.highContrast }));
   }, []);
 
   const value = useMemo(() => ({
     ...preferences,
+    language,
+    siteConfiguration,
+    configurationError,
     fontScale,
     translate,
     changeFontSize,
-    setLanguage,
     toggleContrast
-  }), [preferences, fontScale, translate, changeFontSize, setLanguage, toggleContrast]);
+  }), [preferences, language, siteConfiguration, configurationError, fontScale, translate, changeFontSize, toggleContrast]);
 
   return <PublicPreferencesContext.Provider value={value}>{children}</PublicPreferencesContext.Provider>;
 }

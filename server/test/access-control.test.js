@@ -45,12 +45,18 @@ function account(id, role = 'Admin', isActive = 1) {
 
 function createAccessControlApp({
   admins = [account(1, 'Super Admin'), account(2)],
+  customRoles = [],
   failList = false,
   failUpdate = false,
   failCreate = false
 } = {}) {
   const state = {
     admins: structuredClone(admins),
+    roles: [
+      { role_key: 'admin', label: 'Admin', is_active: 1 },
+      { role_key: 'super-admin', label: 'Super Admin', is_active: 1 },
+      ...structuredClone(customRoles)
+    ],
     sessionsInvalidatedFor: [],
     failList,
     failUpdate,
@@ -64,6 +70,10 @@ function createAccessControlApp({
       if (sql.includes('FROM admins WHERE id = ? LIMIT 1')) {
         const admin = state.admins.find((row) => row.id === String(values[0]));
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
+      }
+      if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+        const role = state.roles.find(({ label }) => label === values[0]);
+        return [[role].filter(Boolean)];
       }
       if (state.failList && sql.startsWith('SELECT COUNT(*) AS total FROM admins')) {
         throw new Error('simulated database failure');
@@ -246,12 +256,77 @@ describe('Super Admin access-control API', () => {
           const admin = state.admins.find((row) => row.email === values[0]);
           return [[admin ? { ...admin } : undefined].filter(Boolean)];
         }
+        if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+          return [[{
+            role_key: values[0] === 'Super Admin' ? 'super-admin' : 'admin',
+            is_active: 1
+          }]];
+        }
         throw new Error(`Unexpected authentication SQL in access-control test: ${sql}`);
       }
     });
     assert.equal(String(loggedIn.id), '3');
     assert.equal(loggedIn.role, 'Admin');
     assert.equal(state.admins[2].is_active, 1);
+  });
+
+  it('assigns active custom roles and rejects inactive roles for account creation and updates', async () => {
+    const { app, state } = createAccessControlApp({
+      customRoles: [
+        { role_key: 'editorial-reviewer', label: 'Editorial Reviewer', is_active: 1 },
+        { role_key: 'inactive-editor', label: 'Inactive Editor', is_active: 0 }
+      ]
+    });
+    const newAccount = {
+      name: 'Custom Role User',
+      email: 'custom-role@example.com',
+      password: 'Strong-password-123!',
+      role: 'Editorial Reviewer'
+    };
+
+    const created = await request(app)
+      .post('/api/admin/access-control/users')
+      .set('x-test-admin-id', '1')
+      .send(newAccount);
+    assert.equal(created.status, 201);
+    assert.equal(created.body.data.role, 'Editorial Reviewer');
+
+    const inactiveAssignment = await request(app)
+      .patch(`/api/admin/access-control/users/${created.body.data.id}`)
+      .set('x-test-admin-id', '1')
+      .send({ role: 'Inactive Editor' });
+    assert.equal(inactiveAssignment.status, 400);
+    assert.equal(state.admins.find((row) => row.id === String(created.body.data.id)).role, 'Editorial Reviewer');
+
+    const { authenticateAdmin } = await import('../src/services/auth.service.js');
+    const activeLogin = await authenticateAdmin('custom-role@example.com', newAccount.password, {
+      async execute(sql, values = []) {
+        if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
+          const admin = state.admins.find((row) => row.email === values[0]);
+          return [[admin ? { ...admin } : undefined].filter(Boolean)];
+        }
+        if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+          const role = state.roles.find(({ label }) => label === values[0]);
+          return [[role ? { role_key: role.role_key, is_active: role.is_active } : undefined].filter(Boolean)];
+        }
+        throw new Error(`Unexpected authentication SQL in access-control test: ${sql}`);
+      }
+    });
+    assert.equal(activeLogin.role, 'Editorial Reviewer');
+    state.roles.find(({ label }) => label === 'Editorial Reviewer').is_active = 0;
+    await assert.rejects(authenticateAdmin('custom-role@example.com', newAccount.password, {
+      async execute(sql, values = []) {
+        if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
+          const admin = state.admins.find((row) => row.email === values[0]);
+          return [[admin ? { ...admin } : undefined].filter(Boolean)];
+        }
+        if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+          const role = state.roles.find(({ label }) => label === values[0]);
+          return [[role ? { role_key: role.role_key, is_active: role.is_active } : undefined].filter(Boolean)];
+        }
+        throw new Error(`Unexpected authentication SQL in access-control test: ${sql}`);
+      }
+    }), /Invalid email or password/);
   });
 
   it('creates inactive and explicitly confirmed Super Admin accounts only when requested', async () => {
@@ -456,6 +531,12 @@ async function stateDatabaseConnection(state) {
     async beginTransaction() {},
     async execute(sql, values = []) {
       if (sql.includes('FROM admins ORDER BY id FOR UPDATE')) return [[...state.admins]];
+      if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
+        return [[{
+          role_key: values[0] === 'Super Admin' ? 'super-admin' : 'admin',
+          is_active: 1
+        }]];
+      }
       if (sql.startsWith('UPDATE admins SET role = ?, is_active = ?, auth_version = auth_version + 1')) {
         const admin = state.admins.find((row) => row.id === String(values[2]));
         Object.assign(admin, {

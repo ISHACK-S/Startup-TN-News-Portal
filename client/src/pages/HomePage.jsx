@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getNews } from '../api/news.js';
@@ -8,10 +9,12 @@ import RevealSection from '../components/RevealSection.jsx';
 import StoryCard from '../components/StoryCard.jsx';
 import StoryImage from '../components/StoryImage.jsx';
 import HomeHeroSlider from '../components/HomeHeroSlider.jsx';
+import HomeVideosSection from '../components/HomeVideosSection.jsx';
 import { EmptyState, ErrorState } from '../components/NewsStates.jsx';
 import { usePublicPreferences } from '../contexts/PublicPreferencesContext.jsx';
 
 export default function HomePage() {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   const [result, setResult] = useState(null);
   const [heroSlides, setHeroSlides] = useState([]);
@@ -22,7 +25,7 @@ export default function HomePage() {
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
-    setError('');
+    setError("");
     Promise.all([
       getPublishedArticles(controller.signal),
       getPublicHeroSlides({ signal: controller.signal }).catch((failure) => {
@@ -80,10 +83,10 @@ export default function HomePage() {
         {!loading && !error && !featured && !heroSlides.length && (
           <section className="home-empty-wrap" aria-label={t('No published stories')}>
             <EmptyState
-              title="The newsroom is getting ready."
+              title={tI18n("The newsroom is getting ready.", { defaultValue: "The newsroom is getting ready." })}
               message={t('There are no published stories just yet. Check back soon for verified news and updates from Tamil Nadu’s startup ecosystem.')}
             />
-            <Link className="button button--outline" to="/news/">{t('Explore the newsroom')} <span aria-hidden="true">→</span></Link>
+            <Link className="button button--outline" to="/news/">{t('Explore the newsroom')} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span></Link>
           </section>
         )}
 
@@ -108,13 +111,11 @@ export default function HomePage() {
                   />
                 </Link>
                 <div className="featured-copy">
-                  <span className="eyebrow eyebrow--gold">{t('Featured story')}</span>
-                  <ArticleMeta article={featured} />
                   <h1 id="featured-heading">
                     <Link to={`/news/${encodeURIComponent(featured.slug)}`}>{featured.title}</Link>
                   </h1>
                   <Link className="button button--gold" to={`/news/${encodeURIComponent(featured.slug)}`}>
-                    {t('Read the story')} <span aria-hidden="true">↗</span>
+                    {t('Read the story')} <span aria-hidden="true">{tI18n("↗", { defaultValue: "↗" })}</span>
                   </Link>
                 </div>
               </div>}
@@ -131,7 +132,7 @@ export default function HomePage() {
                   <h2 id="latest-heading">{t('Latest news')}</h2>
                 </div>
                 <Link className="text-link section-more" to="/news/">
-                  {t('All news')} <span aria-hidden="true">→</span>
+                  {t('All news')} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span>
                 </Link>
               </div>
               {latest.length > 0 ? (
@@ -154,6 +155,8 @@ export default function HomePage() {
                 </div>
               )}
             </RevealSection>
+
+            <HomeVideosSection />
 
             {trending.length > 0 && (
               <RevealSection className="trending-section" aria-labelledby="trending-heading">
@@ -188,7 +191,7 @@ export default function HomePage() {
                         <h2 id={`category-${category.slug}`}>{t(category.name)}</h2>
                       </div>
                       <Link className="text-link" to={`/news/?category=${category.slug}`}>
-                        {t('More')} {t(category.name)} <span aria-hidden="true">→</span>
+                        {t('More')} {t(category.name)} <span aria-hidden="true">{tI18n("→", { defaultValue: "→" })}</span>
                       </Link>
                     </div>
                     <div className={`story-grid category-story-grid${category.articles.length === 1 ? ' category-story-grid--single' : category.articles.length === 2 ? ' category-story-grid--double' : ''}`}>
@@ -227,8 +230,8 @@ async function getPublishedArticles(signal) {
 }
 
 function MoreHeadlines({ articles }) {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
-  const panelRef = useRef(null);
   const listRef = useRef(null);
   const [looping, setLooping] = useState(false);
 
@@ -267,102 +270,68 @@ function MoreHeadlines({ articles }) {
   }, [articles]);
 
   useEffect(() => {
-    const panel = panelRef.current;
     const list = listRef.current;
-    if (!panel || !list || !looping) return undefined;
+    if (!list || !looping) return undefined;
 
     let frameId = 0;
-    let resumeTimer = 0;
+    let interactionTimer = 0;
     let lastTimestamp = 0;
-    let hovered = false;
-    let focused = false;
-    let interacting = false;
+    let scrollPosition = list.scrollTop;
+    let interactionPaused = false;
 
     const resumeAfterInteraction = () => {
-      window.clearTimeout(resumeTimer);
-      resumeTimer = window.setTimeout(() => {
-        interacting = false;
-      }, 900);
+      interactionPaused = false;
+      interactionTimer = 0;
+      scrollPosition = list.scrollTop;
+      lastTimestamp = 0;
     };
-    const beginInteraction = () => {
-      interacting = true;
-      window.clearTimeout(resumeTimer);
+    const pauseForInteraction = () => {
+      interactionPaused = true;
+      lastTimestamp = 0;
+      window.clearTimeout(interactionTimer);
+      interactionTimer = window.setTimeout(resumeAfterInteraction, 3000);
     };
-    const onMouseEnter = () => { hovered = true; };
-    const onMouseLeave = () => { hovered = false; };
-    const onFocusIn = () => { focused = true; };
-    const onFocusOut = (event) => {
-      if (!panel.contains(event.relatedTarget)) focused = false;
-    };
-    const onPointerDown = beginInteraction;
-    const onPointerUp = resumeAfterInteraction;
-    const onTouchEnd = resumeAfterInteraction;
-    const onWheel = () => {
-      beginInteraction();
-      resumeAfterInteraction();
-    };
-    const onKeyDown = (event) => {
-      if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) {
-        beginInteraction();
-        resumeAfterInteraction();
-      }
-    };
-
-    panel.addEventListener('mouseenter', onMouseEnter);
-    panel.addEventListener('mouseleave', onMouseLeave);
-    panel.addEventListener('focusin', onFocusIn);
-    panel.addEventListener('focusout', onFocusOut);
-    list.addEventListener('pointerdown', onPointerDown, { passive: true });
-    window.addEventListener('pointerup', onPointerUp, { passive: true });
-    list.addEventListener('touchstart', beginInteraction, { passive: true });
-    list.addEventListener('touchend', onTouchEnd, { passive: true });
-    list.addEventListener('touchcancel', onTouchEnd, { passive: true });
-    list.addEventListener('wheel', onWheel, { passive: true });
-    list.addEventListener('keydown', onKeyDown);
 
     const animate = (timestamp) => {
-      const delta = lastTimestamp ? Math.min(timestamp - lastTimestamp, 50) : 0;
-      lastTimestamp = timestamp;
+      const delta = lastTimestamp ? Math.max(timestamp - lastTimestamp, 0) : 0;
+      lastTimestamp = interactionPaused ? 0 : timestamp;
 
-      if (!hovered && !focused && !interacting) {
-        const firstSequence = list.firstElementChild;
-        const loopHeight = firstSequence?.offsetHeight ?? 0;
-        if (loopHeight > list.clientHeight) {
-          list.scrollTop += delta * 0.016;
-          if (list.scrollTop >= loopHeight) list.scrollTop -= loopHeight;
-        }
-      } else {
-        lastTimestamp = 0;
+      const firstSequence = list.firstElementChild;
+      const loopHeight = firstSequence?.offsetHeight ?? 0;
+      if (!interactionPaused && loopHeight > list.clientHeight) {
+        scrollPosition = (scrollPosition + delta * 0.016) % loopHeight;
+        list.scrollTop = scrollPosition;
       }
       frameId = window.requestAnimationFrame(animate);
     };
+    list.addEventListener('wheel', pauseForInteraction, { passive: true });
+    list.addEventListener('touchstart', pauseForInteraction, { passive: true });
+    list.addEventListener('touchmove', pauseForInteraction, { passive: true });
+    list.addEventListener('touchend', pauseForInteraction, { passive: true });
+    list.addEventListener('touchcancel', pauseForInteraction, { passive: true });
+    list.addEventListener('keydown', pauseForInteraction);
     frameId = window.requestAnimationFrame(animate);
 
     return () => {
       window.cancelAnimationFrame(frameId);
-      window.clearTimeout(resumeTimer);
-      panel.removeEventListener('mouseenter', onMouseEnter);
-      panel.removeEventListener('mouseleave', onMouseLeave);
-      panel.removeEventListener('focusin', onFocusIn);
-      panel.removeEventListener('focusout', onFocusOut);
-      list.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('pointerup', onPointerUp);
-      list.removeEventListener('touchstart', beginInteraction);
-      list.removeEventListener('touchend', onTouchEnd);
-      list.removeEventListener('touchcancel', onTouchEnd);
-      list.removeEventListener('wheel', onWheel);
-      list.removeEventListener('keydown', onKeyDown);
+      window.clearTimeout(interactionTimer);
+      list.removeEventListener('wheel', pauseForInteraction);
+      list.removeEventListener('touchstart', pauseForInteraction);
+      list.removeEventListener('touchmove', pauseForInteraction);
+      list.removeEventListener('touchend', pauseForInteraction);
+      list.removeEventListener('touchcancel', pauseForInteraction);
+      list.removeEventListener('keydown', pauseForInteraction);
     };
   }, [looping]);
 
   return (
-    <aside className="lead-support" ref={panelRef} aria-labelledby="lead-support-heading">
+    <aside className="lead-support" aria-labelledby="lead-support-heading">
       <div className="section-heading section-heading--row lead-support-heading">
         <div>
           <span className="eyebrow">{t('The newsroom')}</span>
           <h2 id="lead-support-heading">{t('More headlines')}</h2>
         </div>
-        <Link className="text-link" to="/news/" aria-label={t('Browse all latest news')}>{t('All news')} →</Link>
+        <Link className="text-link" to="/news/" aria-label={t('Browse all latest news')}>{t('All news')} {tI18n("→", { defaultValue: "→" })}</Link>
       </div>
       {articles.length > 0 ? (
         <div
@@ -393,6 +362,7 @@ function MoreHeadlines({ articles }) {
 }
 
 function SupportingStory({ article, index }) {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   return (
     <article className={`supporting-story${index ? ' supporting-story--numbered' : ''}`}>
@@ -413,6 +383,7 @@ function SupportingStory({ article, index }) {
 }
 
 function HomeLoading() {
+  const { t: tI18n } = useTranslation('public');
   const { translate: t } = usePublicPreferences();
   return (
     <div className="home-loading" aria-label={t('Loading news')} aria-busy="true">
