@@ -31,6 +31,7 @@ const categories = [
 const admin = {
   id: 1,
   name: 'Test Admin',
+  username: 'test-admin',
   email: 'admin@example.com',
   role: 'Admin',
   is_active: 1,
@@ -96,8 +97,14 @@ function createFakeDatabase() {
       if (sql.includes('FROM media_assets WHERE cloudinary_public_id = ?')) {
         return [mediaAssets.filter((asset) => asset.cloudinary_public_id === values[0])];
       }
-      if (sql.includes('FROM admins WHERE email = ?')) {
-        return [[admin.email === values[0] ? { ...admin, password_hash: adminHash } : undefined].filter(Boolean)];
+      if (sql.includes('FROM admins WHERE username = ?')) {
+        return [[admin.username === values[0] ? { ...admin, password_hash: adminHash } : undefined].filter(Boolean)];
+      }
+      if (sql.includes('WHERE email = ?')
+          && sql.includes('EXISTS (SELECT 1 FROM admins WHERE username IS NULL)')) {
+        return [[admin.email === values[0] && admin.username == null
+          ? { ...admin, password_hash: adminHash }
+          : undefined].filter(Boolean)];
       }
       if (sql.includes('FROM admins WHERE id = ?')) {
         return [[admin.id === Number(values[0]) ? { ...admin } : undefined].filter(Boolean)];
@@ -297,7 +304,7 @@ describe('admin authentication and article API', () => {
 
     const agent = request.agent(app);
     const login = await agent.post('/api/auth/login').send({
-      email: admin.email,
+      username: admin.username,
       password: 'correct-test-password'
     });
     assert.equal(login.status, 200);
@@ -307,21 +314,21 @@ describe('admin authentication and article API', () => {
   });
 
   it('validates login fields and does not create a session on failure', async () => {
-    const invalid = await request(app).post('/api/auth/login').send({ email: 'bad', password: '' });
+    const invalid = await request(app).post('/api/auth/login').send({ username: 'bad', password: '' });
     assert.equal(invalid.status, 400);
 
     const rejected = await request(app)
       .post('/api/auth/login')
-      .send({ email: admin.email, password: 'wrong-password' });
+      .send({ username: 'unknown-user', password: 'wrong-password' });
     assert.equal(rejected.status, 401);
-    assert.equal(rejected.body.error.message, 'Invalid email or password.');
+    assert.equal(rejected.body.error.message, 'Invalid username or password.');
   });
 
   it('rejects cross-origin state-changing requests', async () => {
     const response = await request(app)
       .post('/api/auth/login')
       .set('Origin', 'https://untrusted.example')
-      .send({ email: admin.email, password: 'correct-test-password' });
+      .send({ username: admin.username, password: 'correct-test-password' });
     assert.equal(response.status, 403);
   });
 
@@ -329,7 +336,7 @@ describe('admin authentication and article API', () => {
     const agent = request.agent(app);
     const login = await agent
       .post('/api/auth/login')
-      .send({ email: admin.email, password: 'correct-test-password' });
+      .send({ username: admin.username, password: 'correct-test-password' });
     assert.equal(login.status, 200);
     assert.equal(login.body.data.admin.role, 'Admin');
     assert.match(login.headers['set-cookie'][0], /HttpOnly/i);
@@ -358,7 +365,7 @@ describe('admin authentication and article API', () => {
 
   it('validates article input, rejects duplicate slugs, and performs CRUD', async () => {
     const agent = request.agent(app);
-    await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
+    await agent.post('/api/auth/login').send({ username: admin.username, password: 'correct-test-password' });
     activityLogs.length = 0;
 
     const invalid = await agent.post('/api/admin/articles').send({
@@ -458,7 +465,7 @@ describe('admin authentication and article API', () => {
     assert.equal(categoryResponse.body.data.length, 2);
 
     const agent = request.agent(app);
-    await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
+    await agent.post('/api/auth/login').send({ username: admin.username, password: 'correct-test-password' });
     assert.equal((await agent.get('/api/auth/me')).body.data.authenticated, true);
     assert.equal((await agent.get('/api/auth/me')).body.data.admin.role, 'Admin');
     assert.equal((await agent.post('/api/auth/logout')).status, 200);
@@ -467,7 +474,7 @@ describe('admin authentication and article API', () => {
 
   it('rejects stale-role sessions and permits the current Super Admin session to manage articles', async () => {
     const agent = request.agent(app);
-    await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
+    await agent.post('/api/auth/login').send({ username: admin.username, password: 'correct-test-password' });
 
     admin.role = 'Super Admin';
     admin.auth_version += 1;
@@ -476,7 +483,7 @@ describe('admin authentication and article API', () => {
     assert.equal((await agent.post('/api/auth/logout')).status, 200);
 
     const login = await agent.post('/api/auth/login').send({
-      email: admin.email,
+      username: admin.username,
       password: 'correct-test-password'
     });
     assert.equal(login.status, 200);
@@ -573,7 +580,7 @@ describe('admin authentication and article API', () => {
     assert.equal(unauthenticated.status, 401);
 
     const agent = request.agent(app);
-    await agent.post('/api/auth/login').send({ email: admin.email, password: 'correct-test-password' });
+    await agent.post('/api/auth/login').send({ username: admin.username, password: 'correct-test-password' });
 
     const invalid = await agent
       .post('/api/admin/uploads')

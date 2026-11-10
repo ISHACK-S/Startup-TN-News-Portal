@@ -33,6 +33,7 @@ export default function AdminUsersPage() {
   const [accountRoles, setAccountRoles] = useState([]);
   const [createValues, setCreateValues] = useState({
     name: '',
+    username: '',
     email: '',
     password: '',
     passwordConfirmation: '',
@@ -134,8 +135,12 @@ export default function AdminUsersPage() {
 
   function validateCreateForm() {
     const errors = {};
+    const normalizedUsername = createValues.username.trim();
     const normalizedEmail = createValues.email.trim();
     if (!createValues.name.trim()) errors.name = 'Enter the administrator’s full name.';
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/.test(normalizedUsername)) {
+      errors.username = 'Use 3–64 letters, numbers, periods, underscores, or hyphens; start with a letter or number.';
+    }
     if (!normalizedEmail) errors.email = 'Enter an email address.';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) errors.email = 'Enter a valid email address.';
     if (createValues.password.length < 12) errors.password = 'Password must be at least 12 characters.';
@@ -169,6 +174,7 @@ export default function AdminUsersPage() {
     try {
       const created = await createAdminUser({
         name: createValues.name.trim(),
+        username: createValues.username.trim().toLowerCase(),
         email: createValues.email.trim(),
         password: createValues.password,
         role: createValues.role,
@@ -180,6 +186,7 @@ export default function AdminUsersPage() {
       setCreateOpen(false);
       setCreateValues({
         name: '',
+        username: '',
         email: '',
         password: '',
         passwordConfirmation: '',
@@ -284,11 +291,11 @@ export default function AdminUsersPage() {
           </div>
           <div className="admin-users-tools">
             <form className="admin-search-form admin-users-search" role="search" onSubmit={submitSearch}>
-              <label className="sr-only" htmlFor="admin-user-search">{tI18n("Search by name or email", { defaultValue: "Search by name or email" })}</label>
+              <label className="sr-only" htmlFor="admin-user-search">{tI18n("Search by name, username, or email", { defaultValue: "Search by name, username, or email" })}</label>
               <input
                 id="admin-user-search"
                 type="search"
-                placeholder={tI18n("Search name or email", { defaultValue: "Search name or email" })}
+                placeholder={tI18n("Search name, username, or email", { defaultValue: "Search name, username, or email" })}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -308,7 +315,7 @@ export default function AdminUsersPage() {
         {!loading && !error && accounts.length === 0 && (
           <AdminEmpty
             title={query ? 'No matching accounts.' : 'No administrator accounts.'}
-            message={query ? 'Try another name or email address.' : 'Accounts provisioned on the server will appear here.'}
+            message={query ? 'Try another name, username, or email address.' : 'Accounts provisioned on the server will appear here.'}
           />
         )}
         {!loading && !error && accounts.length > 0 && (
@@ -332,6 +339,7 @@ export default function AdminUsersPage() {
                       <tr key={account.id}>
                         <td className="admin-user-identity" data-label="Administrator">
                           <strong>{account.name}</strong>
+                          <span>{account.username || 'Username not assigned'}</span>
                           <span>{account.email}</span>
                         </td>
                         <td data-label="Role">
@@ -468,6 +476,18 @@ export default function AdminUsersPage() {
             {!rolesLoading && !rolesError && (
               <form className="admin-create-account-form" onSubmit={submitCreateForm} noValidate>
                 {createError && <div className="admin-alert admin-alert--error" role="alert">{createError}</div>}
+                <label className="admin-create-field">
+                  <span>{tI18n("Username", { defaultValue: "Username" })}</span>
+                  <input
+                    autoComplete="username"
+                    maxLength={64}
+                    value={createValues.username}
+                    aria-invalid={Boolean(createErrors.username)}
+                    aria-describedby={createErrors.username ? 'create-username-error' : undefined}
+                    onChange={(event) => setCreateValues((current) => ({ ...current, username: event.target.value }))}
+                  />
+                  {createErrors.username && <small id="create-username-error" role="alert">{createErrors.username}</small>}
+                </label>
                 <label className="admin-create-field">
                   <span>{tI18n("Full Name", { defaultValue: "Full Name" })}</span>
                   <input

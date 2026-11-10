@@ -9,30 +9,42 @@ const DUMMY_PASSWORD_HASH = bcrypt.hash(randomBytes(32).toString('hex'), 12);
 export const ADMIN_ROLES = Object.freeze(['Admin', 'Super Admin']);
 export { hashAdminPassword };
 
-export async function authenticateAdmin(email, password, database = pool) {
-  const [rows] = await database.execute(
-    `SELECT id, name, email, password_hash, role, is_active, auth_version
-     FROM admins WHERE email = ? LIMIT 1`,
-    [email.toLowerCase()]
+export async function authenticateAdmin(username, password, database = pool) {
+  const [usernameRows] = await database.execute(
+    `SELECT id, name, username, email, password_hash, role, is_active, auth_version
+     FROM admins WHERE username = ? LIMIT 1`,
+    [username.toLowerCase()]
   );
-  const admin = rows[0];
+  let admin = usernameRows[0];
+  if (!admin) {
+    const [legacyRows] = await database.execute(
+      `SELECT id, name, username, email, password_hash, role, is_active, auth_version
+       FROM admins
+       WHERE email = ?
+         AND EXISTS (SELECT 1 FROM admins WHERE username IS NULL)
+       LIMIT 1`,
+      [username.toLowerCase()]
+    );
+    admin = legacyRows[0];
+  }
   const hash = admin?.password_hash ?? (await DUMMY_PASSWORD_HASH);
   const passwordMatches = await bcrypt.compare(password, hash);
 
   if (!admin || !passwordMatches || Number(admin.is_active) !== 1) {
-    throw new HttpError(401, 'Invalid email or password.');
+    throw new HttpError(401, 'Invalid username or password.');
   }
   const [roleRows] = await database.execute(
     'SELECT role_key, is_active FROM permission_roles WHERE label = ? LIMIT 1',
     [admin.role]
   );
   if (!roleRows[0] || Number(roleRows[0].is_active) !== 1) {
-    throw new HttpError(401, 'Invalid email or password.');
+    throw new HttpError(401, 'Invalid username or password.');
   }
 
   return {
     id: admin.id,
     name: admin.name,
+    username: admin.username,
     email: admin.email,
     role: admin.role,
     authVersion: Number(admin.auth_version)
@@ -148,6 +160,7 @@ function publicAdmin(admin, role = admin.role, isActive = Number(admin.is_active
   return {
     id: admin.id,
     name: admin.name,
+    username: admin.username,
     email: admin.email,
     role,
     isActive,

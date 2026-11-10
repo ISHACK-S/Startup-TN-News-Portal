@@ -111,6 +111,7 @@ function installApi() {
   currentProfile = {
     id: '4',
     name: 'Editorial Admin',
+    username: 'editor',
     email: 'editor@example.com',
     role: 'Admin',
     isActive: true,
@@ -152,6 +153,7 @@ function installApi() {
     return {
       id: String(id),
       name: id === 4 ? 'Editorial Admin' : `News Admin ${id}`,
+      username: id === 4 ? 'editor' : `admin${id}`,
       email: id === 4 ? 'editor@example.com' : `admin${id}@example.com`,
       role: id === 4 ? currentAdminRole : 'Admin',
       isActive: true,
@@ -211,6 +213,7 @@ function installApi() {
             ? {
               id: 4,
               name: currentProfile.name,
+              username: currentProfile.username,
               email: currentProfile.email,
               role: currentAdminRole
             }
@@ -220,8 +223,8 @@ function installApi() {
     }
     if (url.pathname === '/api/auth/login' && method === 'POST') {
       const credentials = JSON.parse(options.body);
-      if (credentials.email !== 'editor@example.com' || credentials.password !== 'strong-password') {
-        return apiResponse({ error: { message: 'Invalid email or password.' } }, 401);
+      if (credentials.username !== 'editor' || credentials.password !== 'strong-password') {
+        return apiResponse({ error: { message: 'Invalid username or password.' } }, 401);
       }
       sessionActive = true;
       accessUsers[0].role = currentAdminRole;
@@ -230,7 +233,8 @@ function installApi() {
           admin: {
             id: 4,
             name: 'Editorial Admin',
-            email: credentials.email,
+            username: credentials.username,
+            email: currentProfile.email,
             role: currentAdminRole
           }
         }
@@ -249,10 +253,11 @@ function installApi() {
       if (!sessionActive) return apiResponse({ error: { message: 'Authentication is required.' } }, 401);
       const changes = JSON.parse(options.body);
       const emailChanged = changes.email.toLowerCase() !== currentProfile.email;
-      currentProfile = { ...currentProfile, ...changes, email: changes.email.toLowerCase() };
+      const usernameChanged = changes.username.toLowerCase() !== currentProfile.username;
+      currentProfile = { ...currentProfile, ...changes, username: changes.username.toLowerCase(), email: changes.email.toLowerCase() };
       return apiResponse({
         data: { profile: { ...currentProfile } },
-        meta: { emailChanged, otherSessionsInvalidated: emailChanged ? 1 : 0 }
+        meta: { emailChanged, usernameChanged, otherSessionsInvalidated: emailChanged || usernameChanged ? 1 : 0 }
       });
     }
     if (url.pathname === '/api/auth/profile/password' && method === 'PATCH') {
@@ -463,6 +468,7 @@ function installApi() {
       const created = {
         id: '90',
         name: payload.name,
+        username: payload.username.toLowerCase(),
         email: payload.email.toLowerCase(),
         role: payload.role,
         isActive: payload.isActive,
@@ -476,7 +482,7 @@ function installApi() {
       const limit = Number(url.searchParams.get('limit') ?? 10);
       const query = url.searchParams.get('q')?.toLowerCase();
       const filtered = accessUsers.filter((account) =>
-        !query || `${account.name} ${account.email}`.toLowerCase().includes(query)
+        !query || `${account.name} ${account.username} ${account.email}`.toLowerCase().includes(query)
       );
       return apiResponse({
         data: filtered.slice((page - 1) * limit, page * limit),
@@ -626,7 +632,7 @@ function renderApp(path) {
 }
 
 async function signIn(user) {
-  await user.type(await screen.findByLabelText('Email address'), 'editor@example.com');
+  await user.type(await screen.findByLabelText('Username'), 'editor');
   await user.type(screen.getByLabelText('Password'), 'strong-password');
   await user.click(screen.getByRole('button', { name: 'Sign in' }));
 }
@@ -647,7 +653,7 @@ describe('admin CMS', () => {
     const user = userEvent.setup();
     renderApp('/admin/news');
 
-    expect(await screen.findByLabelText('Email address')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Username')).toHaveAttribute('type', 'text');
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/auth/me',
       expect.objectContaining({ credentials: 'include' })
@@ -656,7 +662,7 @@ describe('admin CMS', () => {
     expect(await screen.findByRole('heading', { name: 'Articles' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Log out' }));
-    expect(await screen.findByLabelText('Email address')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Username')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/auth/logout',
       expect.objectContaining({ credentials: 'include', method: 'POST' })
@@ -703,6 +709,7 @@ describe('admin CMS', () => {
     await user.click(await screen.findByRole('button', { name: 'Create Account' }));
     expect(await screen.findByRole('dialog', { name: 'Create administrator account' })).toBeInTheDocument();
     await user.type(screen.getByLabelText('Full Name'), 'New User');
+    await user.type(screen.getByLabelText('Username'), 'New.User');
     await user.type(screen.getByLabelText('Email Address'), 'NEW.USER@example.com');
     await user.type(screen.getByLabelText('Initial Password'), 'Strong-password-123!');
     await user.type(screen.getByLabelText('Confirm Password'), 'Strong-password-123!');
@@ -711,6 +718,7 @@ describe('admin CMS', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create Account' }));
 
     expect(await screen.findByRole('status')).toHaveTextContent('New User was created successfully.');
+    expect(await screen.findByText('new.user')).toBeInTheDocument();
     expect(await screen.findByText('new.user@example.com')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/admin/access-control/permissions/roles',
@@ -722,6 +730,7 @@ describe('admin CMS', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'New User',
+          username: 'new.user',
           email: 'NEW.USER@example.com',
           password: 'Strong-password-123!',
           role: 'Admin',
@@ -739,6 +748,7 @@ describe('admin CMS', () => {
     await user.click(await screen.findByRole('button', { name: 'Create Account' }));
     await screen.findByRole('dialog', { name: 'Create administrator account' });
     await user.type(screen.getByLabelText('Full Name'), 'Elevated User');
+    await user.type(screen.getByLabelText('Username'), 'elevated');
     await user.type(screen.getByLabelText('Email Address'), 'elevated@example.com');
     await user.type(screen.getByLabelText('Initial Password'), 'Strong-password-123!');
     await user.type(screen.getByLabelText('Confirm Password'), 'Strong-password-123!');
@@ -759,6 +769,7 @@ describe('admin CMS', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'Elevated User',
+          username: 'elevated',
           email: 'elevated@example.com',
           password: 'Strong-password-123!',
           role: 'Super Admin',
@@ -777,6 +788,7 @@ describe('admin CMS', () => {
     await user.click(await screen.findByRole('button', { name: 'Create Account' }));
     await screen.findByRole('dialog', { name: 'Create administrator account' });
     await user.type(screen.getByLabelText('Full Name'), 'New User');
+    await user.type(screen.getByLabelText('Username'), 'new-user');
     await user.type(screen.getByLabelText('Email Address'), 'new@example.com');
     await user.type(screen.getByLabelText('Initial Password'), 'Strong-password-123!');
     await user.type(screen.getByLabelText('Confirm Password'), 'Different-password-123!');
@@ -1120,6 +1132,7 @@ describe('admin CMS', () => {
 
     expect(await screen.findByRole('heading', { name: 'Profile Settings' })).toBeInTheDocument();
     expect(screen.getByText('Account Information')).toBeInTheDocument();
+    expect(screen.getByText('editor', { selector: 'dd' })).toBeInTheDocument();
     expect(screen.getByText('Admin', { selector: 'dd' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Profile Settings' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1136,7 +1149,7 @@ describe('admin CMS', () => {
       '/api/auth/profile',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ name: 'Updated Editor', email: 'editor@example.com' })
+        body: JSON.stringify({ name: 'Updated Editor', username: 'editor', email: 'editor@example.com' })
       })
     );
 
@@ -1375,7 +1388,7 @@ describe('admin CMS', () => {
     await signIn(user);
     await screen.findByText('News Admin 5');
 
-    await user.type(screen.getByRole('searchbox', { name: 'Search by name or email' }), 'News Admin 14');
+    await user.type(screen.getByRole('searchbox', { name: 'Search by name, username, or email' }), 'News Admin 14');
     await user.click(screen.getByRole('button', { name: 'Search' }));
     expect(await screen.findByText('News Admin 14')).toBeInTheDocument();
     expect(screen.getByText('1 accounts')).toBeInTheDocument();
@@ -1384,7 +1397,7 @@ describe('admin CMS', () => {
       expect.objectContaining({ credentials: 'include' })
     );
 
-    await user.clear(screen.getByRole('searchbox', { name: 'Search by name or email' }));
+    await user.clear(screen.getByRole('searchbox', { name: 'Search by name, username, or email' }));
     await user.click(screen.getByRole('button', { name: 'Search' }));
     await screen.findByText('News Admin 5');
     expect(screen.getByText('Page 1 of 2')).toBeInTheDocument();
@@ -1458,7 +1471,7 @@ describe('admin CMS', () => {
 
     accessControlFailureStatus = 401;
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByLabelText('Email address')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Username')).toBeInTheDocument();
   });
 
   it('creates a persisted draft, previews current unsaved content, and publishes it', async () => {
@@ -1648,10 +1661,10 @@ describe('admin CMS', () => {
   it('shows invalid credentials without granting access', async () => {
     const user = userEvent.setup();
     renderApp('/admin/login');
-    await user.type(await screen.findByLabelText('Email address'), 'editor@example.com');
+    await user.type(await screen.findByLabelText('Username'), 'editor@example.com');
     await user.type(screen.getByLabelText('Password'), 'wrong-password');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email or password.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid username or password.');
     expect(screen.queryByRole('heading', { name: 'Overview' })).not.toBeInTheDocument();
   });
 });

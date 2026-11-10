@@ -25,8 +25,8 @@ function saveUpdatedSession(request) {
 }
 
 export const loginController = asyncHandler(async (request, response, next) => {
-  const { email, password } = request.validated.body;
-  const admin = await authenticateAdmin(email, password, request.app.locals.database);
+  const { username, password } = request.validated.body;
+  const admin = await authenticateAdmin(username, password, request.app.locals.database);
   request.activityAdmin = admin;
 
   request.session.regenerate((error) => {
@@ -37,6 +37,7 @@ export const loginController = asyncHandler(async (request, response, next) => {
 
     request.session.adminId = admin.id;
     request.session.adminName = admin.name;
+    request.session.adminUsername = admin.username;
     request.session.adminEmail = admin.email;
     request.session.authVersion = admin.authVersion;
     request.session.save((saveError) => {
@@ -48,6 +49,7 @@ export const loginController = asyncHandler(async (request, response, next) => {
       const publicAdmin = {
         id: admin.id,
         name: admin.name,
+        username: admin.username,
         email: admin.email,
         role: admin.role
       };
@@ -88,6 +90,7 @@ export const meController = asyncHandler(async (request, response) => {
       admin: {
         id: request.admin.id,
         name: request.admin.name,
+        username: request.admin.username,
         email: request.admin.email,
         role: request.admin.role
       }
@@ -109,16 +112,18 @@ export const updateCurrentAdminProfileController = asyncHandler(async (request, 
     request.validated.body
   ));
   request.session.adminName = result.profile.name;
+  request.session.adminUsername = result.profile.username;
   request.session.adminEmail = result.profile.email;
   request.activityChanges = {
     after: { sessionsInvalidated: result.otherSessionsInvalidated }
   };
-  if (result.emailChanged) request.session.authVersion = result.authVersion;
-  if (result.emailChanged) await saveUpdatedSession(request);
+  if (result.emailChanged || result.usernameChanged) request.session.authVersion = result.authVersion;
+  if (result.emailChanged || result.usernameChanged) await saveUpdatedSession(request);
   response.status(200).json({
     data: { profile: result.profile },
     meta: {
       emailChanged: result.emailChanged,
+      usernameChanged: result.usernameChanged,
       otherSessionsInvalidated: result.otherSessionsInvalidated
     }
   });

@@ -8,11 +8,14 @@ import {
 } from '../config/public-site-defaults.js';
 
 const STORAGE_KEY = 'startuptn-public-preferences';
+const THEME_STORAGE_KEY = 'startuptn-public-theme';
 const FONT_SCALES = [0.85, 0.925, 1, 1.075, 1.15, 1.225, 1.3];
 const DEFAULT_PREFERENCES = { fontIndex: 2, highContrast: false };
+const DEFAULT_THEME = 'light';
 const PublicPreferencesContext = createContext({
   fontIndex: DEFAULT_PREFERENCES.fontIndex,
   highContrast: false,
+  theme: DEFAULT_THEME,
   language: 'en',
   fontScale: 1,
   translate: (text) => text,
@@ -21,6 +24,16 @@ const PublicPreferencesContext = createContext({
   changeFontSize: () => {},
   toggleContrast: () => {}
 });
+
+function getInitialTheme() {
+  try {
+    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
+  } catch {
+    // Use the default theme when storage is disabled.
+  }
+  return DEFAULT_THEME;
+}
 
 function readPreferences() {
   try {
@@ -39,6 +52,7 @@ function readPreferences() {
 export function PublicPreferencesProvider({ children }) {
   const { i18n: languageI18n } = useTranslation();
   const [preferences, setPreferences] = useState(readPreferences);
+  const [theme, setTheme] = useState(getInitialTheme);
   const [siteConfiguration, setSiteConfiguration] = useState(() => (
     normalizePublicWebsiteConfiguration(DEFAULT_PUBLIC_WEBSITE_CONFIGURATION)
   ));
@@ -91,13 +105,14 @@ export function PublicPreferencesProvider({ children }) {
     const root = document.documentElement;
     root.lang = language;
     root.dataset.highContrast = String(preferences.highContrast);
+    root.dataset.theme = theme;
     root.style.setProperty('--user-font-scale', String(fontScale));
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...preferences, language }));
     } catch {
       // Preferences remain active for this page session when storage is unavailable.
     }
-  }, [fontScale, language, preferences]);
+  }, [fontScale, language, preferences, theme]);
 
   useLayoutEffect(() => {
     let active = true;
@@ -240,17 +255,28 @@ export function PublicPreferencesProvider({ children }) {
   const toggleContrast = useCallback(() => {
     setPreferences((current) => ({ ...current, highContrast: !current.highContrast }));
   }, []);
+  const toggleTheme = useCallback(() => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    } catch {
+      // The selected theme remains active for this page session when storage is unavailable.
+    }
+  }, [theme]);
 
   const value = useMemo(() => ({
     ...preferences,
+    theme,
     language,
     siteConfiguration,
     configurationError,
     fontScale,
     translate,
     changeFontSize,
-    toggleContrast
-  }), [preferences, language, siteConfiguration, configurationError, fontScale, translate, changeFontSize, toggleContrast]);
+    toggleContrast,
+    toggleTheme
+  }), [preferences, theme, language, siteConfiguration, configurationError, fontScale, translate, changeFontSize, toggleContrast, toggleTheme]);
 
   return <PublicPreferencesContext.Provider value={value}>{children}</PublicPreferencesContext.Provider>;
 }

@@ -34,6 +34,7 @@ function account(id, role = 'Admin', isActive = 1) {
   return {
     id: String(id),
     name: `Admin ${id}`,
+    username: `admin${id}`,
     email: `admin${id}@example.com`,
     password_hash: `private-hash-${id}`,
     role,
@@ -85,26 +86,30 @@ function createAccessControlApp({
       if (sql.includes('FROM admins ORDER BY id FOR UPDATE')) {
         return [[...state.admins].sort((a, b) => Number(a.id) - Number(b.id)).map((row) => ({ ...row }))];
       }
+      if (sql.startsWith('SELECT id FROM admins WHERE username = ? LIMIT 1 FOR UPDATE')) {
+        const admin = state.admins.find((row) => row.username === values[0]);
+        return [[admin ? { id: admin.id } : undefined].filter(Boolean)];
+      }
       if (sql.startsWith('SELECT id FROM admins WHERE email = ? LIMIT 1 FOR UPDATE')) {
         const admin = state.admins.find((row) => row.email === values[0]);
         return [[admin ? { id: admin.id } : undefined].filter(Boolean)];
       }
       if (
-        sql.startsWith('SELECT id, name, email, role, is_active, created_at')
+        sql.startsWith('SELECT id, name, username, email, role, is_active, created_at')
         && sql.includes('WHERE id = ?')
       ) {
         const admin = state.admins.find((row) => row.id === String(values[0]));
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
       }
-      if (sql.startsWith('SELECT id, name, email, role, is_active, created_at')) {
+      if (sql.startsWith('SELECT id, name, username, email, role, is_active, created_at')) {
         const filtered = searchAccounts(state.admins, values[0]);
         const limit = Number(values.at(-2));
         const offset = Number(values.at(-1));
         return [[...filtered]
           .sort((a, b) => b.created_at.localeCompare(a.created_at) || Number(b.id) - Number(a.id))
           .slice(offset, offset + limit)
-          .map(({ id, name, email, role, is_active, created_at }) => ({
-            id, name, email, role, is_active, created_at
+          .map(({ id, name, username, email, role, is_active, created_at }) => ({
+            id, name, username, email, role, is_active, created_at
           }))];
       }
       if (sql.startsWith('UPDATE admins SET role = ?, is_active = ?, auth_version = auth_version + 1')) {
@@ -117,9 +122,9 @@ function createAccessControlApp({
         });
         return [{ affectedRows: 1 }];
       }
-      if (sql.startsWith('INSERT INTO admins (name, email, password_hash, role, is_active)')) {
+      if (sql.startsWith('INSERT INTO admins (name, username, email, password_hash, role, is_active)')) {
         if (state.failCreate) throw new Error('simulated insert failure');
-        if (state.admins.some((row) => row.email === values[1])) {
+        if (state.admins.some((row) => row.username === values[1] || row.email === values[2])) {
           const error = new Error('duplicate key');
           error.code = 'ER_DUP_ENTRY';
           throw error;
@@ -128,21 +133,24 @@ function createAccessControlApp({
         state.admins.push({
           id,
           name: values[0],
-          email: values[1],
-          password_hash: values[2],
-          role: values[3],
-          is_active: values[4],
+          username: values[1],
+          email: values[2],
+          password_hash: values[3],
+          role: values[4],
+          is_active: values[5],
           auth_version: 0,
           created_at: '2026-01-03T03:04:05.000Z'
         });
         return [{ insertId: Number(id), affectedRows: 1 }];
       }
-      if (sql.startsWith('SELECT id, name, email, role, is_active, created_at FROM admins WHERE id = ?')) {
+      if (sql.startsWith('SELECT id, name, username, email, role, is_active, created_at FROM admins WHERE id = ?')) {
         const admin = state.admins.find((row) => row.id === String(values[0]));
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
       }
-      if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
-        const admin = state.admins.find((row) => row.email === values[0]);
+      if (sql.startsWith('SELECT id, name, username, email, password_hash, role, is_active, auth_version')) {
+        const admin = sql.includes('WHERE username = ?')
+          ? state.admins.find((row) => row.username === values[0])
+          : state.admins.find((row) => row.email === values[0] && row.username == null);
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
       }
       if (sql.startsWith('DELETE FROM admin_sessions')) {
@@ -202,7 +210,9 @@ function searchAccounts(admins, pattern) {
   if (!pattern) return admins;
   const query = pattern.replace(/^%|%$/g, '').replace(/\\([\\%_])/g, '$1').toLowerCase();
   return admins.filter((admin) =>
-    admin.name.toLowerCase().includes(query) || admin.email.toLowerCase().includes(query)
+    admin.name.toLowerCase().includes(query)
+      || admin.username.toLowerCase().includes(query)
+      || admin.email.toLowerCase().includes(query)
   );
 }
 
@@ -230,6 +240,7 @@ describe('Super Admin access-control API', () => {
       .set('x-test-admin-id', '1')
       .send({
         name: '  New Editor  ',
+        username: '  New.Editor ',
         email: '  New.Editor@Example.COM  ',
         password: 'Strong-password-123!',
         role: 'Admin'
@@ -239,6 +250,7 @@ describe('Super Admin access-control API', () => {
     assert.deepEqual(response.body.data, {
       id: '3',
       name: 'New Editor',
+      username: 'new.editor',
       email: 'new.editor@example.com',
       role: 'Admin',
       isActive: true,
@@ -250,10 +262,12 @@ describe('Super Admin access-control API', () => {
     assert.doesNotMatch(JSON.stringify(response.body), /password|hash|auth_version/);
 
     const { authenticateAdmin } = await import('../src/services/auth.service.js');
-    const loggedIn = await authenticateAdmin('NEW.EDITOR@example.com', 'Strong-password-123!', {
+    const loggedIn = await authenticateAdmin('NEW.EDITOR', 'Strong-password-123!', {
       async execute(sql, values = []) {
-        if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
-          const admin = state.admins.find((row) => row.email === values[0]);
+        if (sql.startsWith('SELECT id, name, username, email, password_hash, role, is_active, auth_version')) {
+          const admin = sql.includes('WHERE username = ?')
+            ? state.admins.find((row) => row.username === values[0])
+            : state.admins.find((row) => row.email === values[0] && row.username == null);
           return [[admin ? { ...admin } : undefined].filter(Boolean)];
         }
         if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
@@ -279,6 +293,7 @@ describe('Super Admin access-control API', () => {
     });
     const newAccount = {
       name: 'Custom Role User',
+      username: 'custom-role',
       email: 'custom-role@example.com',
       password: 'Strong-password-123!',
       role: 'Editorial Reviewer'
@@ -299,10 +314,12 @@ describe('Super Admin access-control API', () => {
     assert.equal(state.admins.find((row) => row.id === String(created.body.data.id)).role, 'Editorial Reviewer');
 
     const { authenticateAdmin } = await import('../src/services/auth.service.js');
-    const activeLogin = await authenticateAdmin('custom-role@example.com', newAccount.password, {
+    const activeLogin = await authenticateAdmin('custom-role', newAccount.password, {
       async execute(sql, values = []) {
-        if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
-          const admin = state.admins.find((row) => row.email === values[0]);
+        if (sql.startsWith('SELECT id, name, username, email, password_hash, role, is_active, auth_version')) {
+          const admin = sql.includes('WHERE username = ?')
+            ? state.admins.find((row) => row.username === values[0])
+            : state.admins.find((row) => row.email === values[0] && row.username == null);
           return [[admin ? { ...admin } : undefined].filter(Boolean)];
         }
         if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
@@ -314,10 +331,12 @@ describe('Super Admin access-control API', () => {
     });
     assert.equal(activeLogin.role, 'Editorial Reviewer');
     state.roles.find(({ label }) => label === 'Editorial Reviewer').is_active = 0;
-    await assert.rejects(authenticateAdmin('custom-role@example.com', newAccount.password, {
+    await assert.rejects(authenticateAdmin('custom-role', newAccount.password, {
       async execute(sql, values = []) {
-        if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
-          const admin = state.admins.find((row) => row.email === values[0]);
+        if (sql.startsWith('SELECT id, name, username, email, password_hash, role, is_active, auth_version')) {
+          const admin = sql.includes('WHERE username = ?')
+            ? state.admins.find((row) => row.username === values[0])
+            : state.admins.find((row) => row.email === values[0] && row.username == null);
           return [[admin ? { ...admin } : undefined].filter(Boolean)];
         }
         if (sql.startsWith('SELECT role_key, is_active FROM permission_roles WHERE label = ?')) {
@@ -326,13 +345,14 @@ describe('Super Admin access-control API', () => {
         }
         throw new Error(`Unexpected authentication SQL in access-control test: ${sql}`);
       }
-    }), /Invalid email or password/);
+    }), /Invalid username or password/);
   });
 
   it('creates inactive and explicitly confirmed Super Admin accounts only when requested', async () => {
     const { app, state } = createAccessControlApp();
     const base = {
       name: 'Elevated Account',
+      username: 'elevated',
       email: 'elevated@example.com',
       password: 'Strong-password-123!',
       role: 'Super Admin'
@@ -352,15 +372,17 @@ describe('Super Admin access-control API', () => {
     assert.equal(state.admins[2].auth_version, 0);
 
     const { authenticateAdmin } = await import('../src/services/auth.service.js');
-    await assert.rejects(authenticateAdmin('elevated@example.com', base.password, {
+    await assert.rejects(authenticateAdmin('elevated', base.password, {
       async execute(sql, values = []) {
-        if (sql.startsWith('SELECT id, name, email, password_hash, role, is_active, auth_version')) {
-          const admin = state.admins.find((row) => row.email === values[0]);
+        if (sql.startsWith('SELECT id, name, username, email, password_hash, role, is_active, auth_version')) {
+          const admin = sql.includes('WHERE username = ?')
+            ? state.admins.find((row) => row.username === values[0])
+            : state.admins.find((row) => row.email === values[0] && row.username == null);
           return [[admin ? { ...admin } : undefined].filter(Boolean)];
         }
         throw new Error(`Unexpected authentication SQL in access-control test: ${sql}`);
       }
-    }), /Invalid email or password/);
+    }), /Invalid username or password/);
   });
 
   it('rejects duplicate email, invalid fields, weak passwords, and unsupported roles', async () => {
@@ -369,11 +391,14 @@ describe('Super Admin access-control API', () => {
       .set('x-test-admin-id', '1').send(body);
     const base = {
       name: 'New Admin',
+      username: 'admin2',
       email: 'admin2@example.com',
       password: 'Strong-password-123!',
       role: 'Admin'
     };
     assert.equal((await endpoint(base)).status, 409);
+    assert.equal((await endpoint({ ...base, username: 'Admin2', email: 'new@example.com' })).status, 409);
+    assert.equal((await endpoint({ ...base, username: 'bad username', email: 'valid@example.com' })).status, 400);
     assert.equal((await endpoint({ ...base, email: 'not-an-email' })).status, 400);
     assert.equal((await endpoint({ ...base, email: 'valid@example.com', password: 'weak' })).status, 400);
     assert.equal((await endpoint({ ...base, email: 'valid@example.com', role: 'Owner' })).status, 400);
@@ -388,6 +413,7 @@ describe('Super Admin access-control API', () => {
       .set('x-test-admin-id', '1')
       .send({
         name: 'Failed Admin',
+        username: 'failed-admin',
         email: 'failed@example.com',
         password: 'Strong-password-123!',
         role: 'Admin'
@@ -408,6 +434,7 @@ describe('Super Admin access-control API', () => {
     assert.deepEqual(response.body.data, [{
       id: '2',
       name: 'Admin 2',
+      username: 'admin2',
       email: 'admin2@example.com',
       role: 'Admin',
       isActive: true,

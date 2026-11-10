@@ -8,6 +8,26 @@
       name="description"
       content="The latest news, ideas and updates from Tamil Nadu's startup ecosystem."
     />
+    <script>
+      (() => {
+        let theme;
+        try {
+          theme = localStorage.getItem('startuptn-public-theme');
+        } catch {
+          theme = null;
+        }
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = 'light';
+        }
+        document.documentElement.dataset.theme = theme;
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>StartupTN News — Stories shaping tomorrow</title>
   </head>

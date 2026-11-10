@@ -89,7 +89,18 @@ There is no public registration. To provision the first admin, run this once fro
 npm run provision-admin
 ```
 
-Enter the admin name and email at the prompts; enter and confirm the password using hidden terminal input. The provisioning script uses a database advisory lock, refuses to proceed if an admin already exists, hashes the password with bcrypt, stores only the hash, and closes its database connection. New passwords must be at least 12 characters, include lowercase and uppercase letters, a number, and a symbol, and use no more than 72 UTF-8 bytes. The same policy applies when updating credentials. Existing passwords are not changed by the role migration. Do not put credentials in command-line arguments, commit them, or leave temporary environment credentials in a shared environment.
+Enter the admin name, username, and email at the prompts; enter and confirm the password using hidden terminal input. Usernames are case-insensitive and use 3–64 letters, numbers, periods, underscores, or hyphens. The provisioning script uses a database advisory lock, refuses to proceed if an admin already exists, hashes the password with bcrypt, stores only the hash, and closes its database connection. New passwords must be at least 12 characters, include lowercase and uppercase letters, a number, and a symbol, and use no more than 72 UTF-8 bytes. The same policy applies when updating credentials. Existing passwords are not changed by the role migration. Do not put credentials in command-line arguments, commit them, or leave temporary environment credentials in a shared environment.
+
+### Admin username rollout
+
+Before deploying the username-enabled application to an existing database, manually apply `database/migrations/012_admin_usernames.sql`. It adds a nullable, unique username column without changing existing accounts. During the transition, all existing administrators can continue signing in with their email in the Username field. New accounts require a username. Assign unique usernames to every existing administrator in Profile Settings and verify no rows remain unassigned; email sign-in is automatically disabled only after all accounts have usernames:
+
+```sql
+SELECT id, name, username, email FROM admins ORDER BY id;
+SELECT COUNT(*) AS accounts_without_username FROM admins WHERE username IS NULL;
+```
+
+Do not make `username` NOT NULL until every existing administrator has a unique username. The application does not automatically run this migration.
 
 To update the email and password of an existing administrator, run this from the repository root in an interactive terminal:
 

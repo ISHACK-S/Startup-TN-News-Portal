@@ -8,6 +8,7 @@ function publicProfile(admin) {
   return {
     id: admin.id,
     name: admin.name,
+    username: admin.username,
     email: admin.email,
     role: admin.role,
     isActive: Number(admin.is_active) === 1,
@@ -17,7 +18,7 @@ function publicProfile(admin) {
 
 async function lockAdmin(database, adminId, expectedAuthVersion) {
   const [rows] = await database.execute(
-    `SELECT id, name, email, password_hash, role, is_active, auth_version, created_at
+    `SELECT id, name, username, email, password_hash, role, is_active, auth_version, created_at
      FROM admins WHERE id = ? LIMIT 1 FOR UPDATE`,
     [adminId]
   );
@@ -46,14 +47,14 @@ async function rollbackAndRethrow(database, error) {
     throw new Error('The profile update failed and its rollback could not be confirmed.');
   }
   if (error.code === 'ER_DUP_ENTRY') {
-    throw new HttpError(409, 'An administrator account already uses this email address.');
+    throw new HttpError(409, 'An administrator account already uses this username or email address.');
   }
   throw error;
 }
 
 export async function getAdminProfile(adminId, database = pool) {
   const [rows] = await database.execute(
-    `SELECT id, name, email, role, is_active, created_at
+    `SELECT id, name, username, email, role, is_active, created_at
      FROM admins WHERE id = ? LIMIT 1`,
     [adminId]
   );
@@ -69,28 +70,37 @@ export async function updateAdminProfile(database, adminId, sessionId, expectedA
     await database.beginTransaction();
     transactionStarted = true;
     const admin = await lockAdmin(database, adminId, expectedAuthVersion);
+    const usernameChanged = admin.username?.toLowerCase() !== changes.username;
     const emailChanged = admin.email.toLowerCase() !== changes.email;
-    const [existing] = await database.execute(
+    const [existingUsername] = await database.execute(
+      'SELECT id FROM admins WHERE username = ? AND id <> ? LIMIT 1',
+      [changes.username, adminId]
+    );
+    if (existingUsername.length) {
+      throw new HttpError(409, 'An administrator account already uses this username.');
+    }
+    const [existingEmail] = await database.execute(
       'SELECT id FROM admins WHERE email = ? AND id <> ? LIMIT 1',
       [changes.email, adminId]
     );
-    if (existing.length) {
+    if (existingEmail.length) {
       throw new HttpError(409, 'An administrator account already uses this email address.');
     }
 
     await database.execute(
-      `UPDATE admins SET name = ?, email = ?, auth_version = auth_version + ?
+      `UPDATE admins SET name = ?, username = ?, email = ?, auth_version = auth_version + ?
        WHERE id = ?`,
-      [changes.name, changes.email, emailChanged ? 1 : 0, adminId]
+      [changes.name, changes.username, changes.email, (usernameChanged || emailChanged) ? 1 : 0, adminId]
     );
-    const otherSessionsInvalidated = emailChanged
+    const credentialsChanged = usernameChanged || emailChanged;
+    const otherSessionsInvalidated = credentialsChanged
       ? await deleteOtherAdminSessions(database, adminId, sessionId)
       : 0;
-    const authVersion = emailChanged
+    const authVersion = credentialsChanged
       ? await getCurrentAuthVersion(database, adminId)
       : Number(admin.auth_version);
     const [updatedRows] = await database.execute(
-      `SELECT id, name, email, role, is_active, created_at
+      `SELECT id, name, username, email, role, is_active, created_at
        FROM admins WHERE id = ? LIMIT 1`,
       [adminId]
     );
@@ -98,6 +108,7 @@ export async function updateAdminProfile(database, adminId, sessionId, expectedA
     transactionStarted = false;
     return {
       profile: publicProfile(updatedRows[0]),
+      usernameChanged,
       emailChanged,
       authVersion,
       otherSessionsInvalidated

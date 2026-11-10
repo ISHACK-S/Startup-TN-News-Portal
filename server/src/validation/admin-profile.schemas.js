@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { adminPasswordSchema } from './admin-password.js';
+import { adminUsernameSchema } from './admin-username.js';
 
 export const adminProfileUpdateSchema = z.object({
   name: z.string().trim().min(1, 'Enter your full name.').max(150),
+  username: adminUsernameSchema,
   email: z.string().trim().email().max(254).transform((email) => email.toLowerCase())
 }).strict();
 

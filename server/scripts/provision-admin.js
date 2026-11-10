@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { pool } from '../src/database/pool.js';
 import { hashAdminPassword } from '../src/services/admin-password.service.js';
 import { adminPasswordSchema } from '../src/validation/admin-password.js';
+import { adminUsernameSchema } from '../src/validation/admin-username.js';
 
 const credentialsSchema = z.object({
   ADMIN_NAME: z.string().trim().min(1).max(150),
+  ADMIN_USERNAME: adminUsernameSchema,
   ADMIN_EMAIL: z.string().trim().email().max(254).transform((email) => email.toLowerCase()),
   ADMIN_PASSWORD: adminPasswordSchema
 });
@@ -66,6 +68,7 @@ function promptHidden(label) {
 async function getCredentials() {
   const credentials = {
     ADMIN_NAME: process.env.ADMIN_NAME,
+    ADMIN_USERNAME: process.env.ADMIN_USERNAME,
     ADMIN_EMAIL: process.env.ADMIN_EMAIL,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD
   };
@@ -81,6 +84,9 @@ async function getCredentials() {
 
   if (!credentials.ADMIN_NAME) {
     credentials.ADMIN_NAME = await promptText('Admin name');
+  }
+  if (!credentials.ADMIN_USERNAME) {
+    credentials.ADMIN_USERNAME = await promptText('Admin username');
   }
   if (!credentials.ADMIN_EMAIL) {
     credentials.ADMIN_EMAIL = await promptText('Admin email');
@@ -125,10 +131,10 @@ async function provisionAdmin() {
 
     const passwordHash = await hashAdminPassword(credentials.ADMIN_PASSWORD);
     await connection.execute(
-      'INSERT INTO admins (name, email, password_hash) VALUES (?, ?, ?)',
-      [credentials.ADMIN_NAME, credentials.ADMIN_EMAIL, passwordHash]
+      'INSERT INTO admins (name, username, email, password_hash) VALUES (?, ?, ?, ?)',
+      [credentials.ADMIN_NAME, credentials.ADMIN_USERNAME, credentials.ADMIN_EMAIL, passwordHash]
     );
-    console.info(`Admin account provisioned for ${credentials.ADMIN_EMAIL}.`);
+    console.info(`Admin account provisioned for username ${credentials.ADMIN_USERNAME}.`);
   } finally {
     try {
       if (lockAcquired) {

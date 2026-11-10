@@ -227,7 +227,7 @@ export default function AdminAccountPermissionsPage() {
                 <option value="">{tI18n("Select an administrator", { defaultValue: "Select an administrator" })}</option>
                 {accounts.map((account) => (
                   <option value={account.id} key={account.id}>
-                    {account.name} {tI18n("·", { defaultValue: "·" })} {account.email} {tI18n("·", { defaultValue: "·" })} {account.role}
+                    {account.name} {tI18n("·", { defaultValue: "·" })} {account.username || account.email} {tI18n("·", { defaultValue: "·" })} {account.role}
                   </option>
                 ))}
               </select>

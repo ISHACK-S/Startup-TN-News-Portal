@@ -6,7 +6,7 @@ import { useAdminAuth } from '../AdminAuthContext.jsx';
 export default function AdminLoginPage() {
   const { t: tI18n } = useTranslation('admin');
   const { admin, checking, sessionError, signIn } = useAdminAuth();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -23,7 +23,7 @@ export default function AdminLoginPage() {
     submitting.current = true;
     setBusy(true);
     try {
-      await signIn({ email: email.trim(), password });
+      await signIn({ username: username.trim(), password });
       const destination = location.state?.from?.pathname;
       navigate(destination?.startsWith('/admin') && destination !== '/admin/login' ? destination : '/admin', {
         replace: true
@@ -50,14 +50,15 @@ export default function AdminLoginPage() {
         </div>
         {sessionError && <p className="admin-form-error" role="alert">{sessionError}</p>}
         <form className="admin-form" onSubmit={submit}>
-          <label htmlFor="admin-email">{tI18n("Email address", { defaultValue: "Email address" })}</label>
+          <label htmlFor="admin-username">{tI18n("Username", { defaultValue: "Username" })}</label>
           <input
-            id="admin-email"
-            type="email"
+            id="admin-username"
+            name="username"
+            type="text"
             autoComplete="username"
             required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
           />
           <label htmlFor="admin-password">{tI18n("Password", { defaultValue: "Password" })}</label>
           <input

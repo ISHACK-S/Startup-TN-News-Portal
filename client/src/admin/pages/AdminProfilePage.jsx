@@ -30,7 +30,7 @@ export default function AdminProfilePage() {
   const { t: tI18n } = useTranslation('admin');
   const { refreshSession } = useAdminAuth();
   const [profile, setProfile] = useState(null);
-  const [profileDraft, setProfileDraft] = useState({ name: '', email: '' });
+  const [profileDraft, setProfileDraft] = useState({ name: '', username: '', email: '' });
   const [passwordDraft, setPasswordDraft] = useState(initialPassword);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -56,7 +56,7 @@ export default function AdminProfilePage() {
     try {
       const current = await getMyAdminProfile({ signal });
       setProfile(current);
-      setProfileDraft({ name: current.name, email: current.email });
+      setProfileDraft({ name: current.name, username: current.username ?? '', email: current.email });
     } catch (error) {
       if (error.name !== 'AbortError') setLoadError(error.message);
     } finally {
@@ -76,9 +76,13 @@ export default function AdminProfilePage() {
     setProfileSuccess('');
     setProfileErrors({});
     const name = profileDraft.name.trim();
+    const username = profileDraft.username.trim().toLowerCase();
     const email = profileDraft.email.trim().toLowerCase();
     const errors = {};
     if (!name) errors.name = 'Enter your full name.';
+    if (!/^[a-z0-9][a-z0-9._-]{2,63}$/.test(username)) {
+      errors.username = 'Use 3–64 letters, numbers, periods, underscores, or hyphens; start with a letter or number.';
+    }
     if (!email) errors.email = 'Enter your email address.';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Enter a valid email address.';
     if (Object.keys(errors).length) {
@@ -90,10 +94,14 @@ export default function AdminProfilePage() {
     profileSubmitting.current = true;
     setProfileBusy(true);
     try {
-      const result = await updateMyAdminProfile({ name, email });
+      const result = await updateMyAdminProfile({ name, username, email });
       setProfile(result.data.profile);
-      setProfileDraft({ name: result.data.profile.name, email: result.data.profile.email });
-      setProfileSuccess(result.meta?.emailChanged
+      setProfileDraft({
+        name: result.data.profile.name,
+        username: result.data.profile.username,
+        email: result.data.profile.email
+      });
+      setProfileSuccess(result.meta?.emailChanged || result.meta?.usernameChanged
         ? 'Your account information was updated. Other sessions were signed out; this session remains active.'
         : 'Your account information was updated.');
       try {
@@ -103,7 +111,10 @@ export default function AdminProfilePage() {
       }
     } catch (error) {
       const errorsFromServer = fieldErrors(error);
-      if (error.status === 409) errorsFromServer.email = error.message;
+      if (error.status === 409) {
+        const field = error.message.toLowerCase().includes('username') ? 'username' : 'email';
+        errorsFromServer[field] = error.message;
+      }
       setProfileErrors(errorsFromServer);
       setProfileError(Object.keys(errorsFromServer).length
         ? 'Check the highlighted information.'
@@ -166,7 +177,7 @@ export default function AdminProfilePage() {
   }
 
   function cancelProfileEdit() {
-    setProfileDraft({ name: profile.name, email: profile.email });
+    setProfileDraft({ name: profile.name, username: profile.username ?? '', email: profile.email });
     setProfileErrors({});
     setProfileError('');
     setProfileSuccess('');
@@ -199,6 +210,7 @@ export default function AdminProfilePage() {
           </div>
         </div>
         <dl className="admin-profile-details">
+          <div><dt>{tI18n("Username", { defaultValue: "Username" })}</dt><dd>{profile.username || 'Not assigned'}</dd></div>
           <div><dt>{tI18n("Full name", { defaultValue: "Full name" })}</dt><dd>{profile.name}</dd></div>
           <div><dt>{tI18n("Email address", { defaultValue: "Email address" })}</dt><dd>{profile.email}</dd></div>
           <div><dt>{tI18n("Assigned role", { defaultValue: "Assigned role" })}</dt><dd>{profile.role}</dd></div>
@@ -231,6 +243,20 @@ export default function AdminProfilePage() {
               aria-describedby={profileErrors.name ? 'profile-name-error' : undefined}
             />
             <ProfileFieldError id="profile-name-error" message={profileErrors.name} />
+            <label htmlFor="profile-username">{tI18n("Username", { defaultValue: "Username" })}</label>
+            <input
+              id="profile-username"
+              name="username"
+              type="text"
+              autoComplete="username"
+              required
+              maxLength={64}
+              value={profileDraft.username}
+              onChange={(event) => setProfileDraft((current) => ({ ...current, username: event.target.value }))}
+              aria-invalid={Boolean(profileErrors.username)}
+              aria-describedby={profileErrors.username ? 'profile-username-error' : undefined}
+            />
+            <ProfileFieldError id="profile-username-error" message={profileErrors.username} />
             <label htmlFor="profile-email">{tI18n("Email address", { defaultValue: "Email address" })}</label>
             <input
               id="profile-email"

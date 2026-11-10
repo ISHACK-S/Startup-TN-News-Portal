@@ -26,6 +26,7 @@ function createDatabase() {
       {
         id: 1,
         name: 'Editorial Admin',
+        username: 'editor',
         email: 'admin@example.com',
         password_hash: '',
         role: 'Admin',
@@ -36,6 +37,7 @@ function createDatabase() {
       {
         id: 2,
         name: 'Site Super Admin',
+        username: 'superadmin',
         email: 'super@example.com',
         password_hash: '',
         role: 'Super Admin',
@@ -46,6 +48,7 @@ function createDatabase() {
       {
         id: 3,
         name: 'Other Admin',
+        username: 'otheradmin',
         email: 'other@example.com',
         password_hash: '',
         role: 'Admin',
@@ -64,9 +67,15 @@ function createDatabase() {
   };
   database = {
     async execute(sql, values = []) {
-      if (sql.includes('FROM admins WHERE email = ? LIMIT 1')) {
-        const admin = state.admins.find((row) => row.email === values[0]);
+      if (sql.includes('FROM admins WHERE username = ? LIMIT 1')) {
+        const admin = state.admins.find((row) => row.username === values[0]);
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
+      }
+      if (sql.includes('WHERE email = ?')
+          && sql.includes('EXISTS (SELECT 1 FROM admins WHERE username IS NULL)')) {
+        const admin = state.admins.find((row) => row.email === values[0]);
+        const rolloutIncomplete = state.admins.some((row) => row.username == null);
+        return [[admin && rolloutIncomplete ? { ...admin } : undefined].filter(Boolean)];
       }
       if (sql.includes('FROM admins WHERE id = ?')) {
         const admin = state.admins.find((row) => String(row.id) === String(values[0]));
@@ -81,17 +90,24 @@ function createDatabase() {
           is_active: 1
         }]];
       }
+      if (sql.startsWith('SELECT id FROM admins WHERE username = ? AND id <> ?')) {
+        const duplicate = state.admins.find(
+          (row) => row.username === values[0] && String(row.id) !== String(values[1])
+        );
+        return [[duplicate ? { id: duplicate.id } : undefined].filter(Boolean)];
+      }
       if (sql.startsWith('SELECT id FROM admins WHERE email = ? AND id <> ?')) {
         const duplicate = state.admins.find(
           (row) => row.email.toLowerCase() === values[0] && String(row.id) !== String(values[1])
         );
         return [[duplicate ? { id: duplicate.id } : undefined].filter(Boolean)];
       }
-      if (sql.startsWith('UPDATE admins SET name = ?, email = ?')) {
-        const admin = state.admins.find((row) => String(row.id) === String(values[3]));
+      if (sql.startsWith('UPDATE admins SET name = ?, username = ?, email = ?')) {
+        const admin = state.admins.find((row) => String(row.id) === String(values[4]));
         admin.name = values[0];
-        admin.email = values[1];
-        admin.auth_version += Number(values[2]);
+        admin.username = values[1];
+        admin.email = values[2];
+        admin.auth_version += Number(values[3]);
         return [{ affectedRows: 1 }];
       }
       if (sql.startsWith('UPDATE admins SET password_hash = ?')) {
@@ -201,12 +217,16 @@ describe('authenticated administrator profile API', () => {
     state.admins.forEach((admin) => { admin.password_hash = passwordHash; });
     const app = createApp();
 
-    for (const [id, role, email] of [[1, 'Admin', 'admin@example.com'], [2, 'Super Admin', 'super@example.com']]) {
+    for (const [id, role, username, email] of [
+      [1, 'Admin', 'editor', 'admin@example.com'],
+      [2, 'Super Admin', 'superadmin', 'super@example.com']
+    ]) {
       const response = await request(app)
         .get('/api/auth/profile')
         .set('x-test-admin-id', String(id));
       assert.equal(response.status, 200);
       assert.equal(response.body.data.profile.role, role);
+      assert.equal(response.body.data.profile.username, username);
       assert.equal(response.body.data.profile.email, email);
       assert.equal(response.body.data.profile.isActive, true);
       assert.equal(Object.hasOwn(response.body.data.profile, 'password_hash'), false);
@@ -222,19 +242,21 @@ describe('authenticated administrator profile API', () => {
     );
   });
 
-  it('updates only the current account and normalizes its email', async () => {
+  it('updates only the current account, normalizes its username and email, and invalidates other sessions', async () => {
     resetTestState();
     const app = createApp();
     const response = await request(app)
       .patch('/api/auth/profile')
       .set('x-test-admin-id', '1')
       .set('x-test-session', 'current-admin-session')
-      .send({ name: 'Updated Editor', email: ' NEW.ADMIN@example.com ' });
+      .send({ name: 'Updated Editor', username: ' New.Editor ', email: ' NEW.ADMIN@example.com ' });
 
     assert.equal(response.status, 200);
     assert.equal(response.body.data.profile.name, 'Updated Editor');
+    assert.equal(response.body.data.profile.username, 'new.editor');
     assert.equal(response.body.data.profile.email, 'new.admin@example.com');
     assert.equal(state.admins[0].role, 'Admin');
+    assert.equal(state.admins[1].username, 'superadmin');
     assert.equal(state.admins[1].email, 'super@example.com');
     assert.equal(state.admins[0].auth_version, 1);
     assert.equal(state.sessions.some((item) => item.session_id === 'current-admin-session'), true);
@@ -254,19 +276,25 @@ describe('authenticated administrator profile API', () => {
     const duplicate = await request(app)
       .patch('/api/auth/profile')
       .set('x-test-admin-id', '1')
-      .send({ name: 'Editor', email: 'other@example.com' });
+      .send({ name: 'Editor', username: 'editor', email: 'other@example.com' });
     assert.equal(duplicate.status, 409);
+
+    const duplicateUsername = await request(app)
+      .patch('/api/auth/profile')
+      .set('x-test-admin-id', '1')
+      .send({ name: 'Editor', username: 'OTHERADMIN', email: 'new@example.com' });
+    assert.equal(duplicateUsername.status, 409);
 
     const invalid = await request(app)
       .patch('/api/auth/profile')
       .set('x-test-admin-id', '1')
-      .send({ name: '', email: 'not-an-email' });
+      .send({ name: '', username: 'bad username', email: 'not-an-email' });
     assert.equal(invalid.status, 400);
 
     const accountSelector = await request(app)
       .patch('/api/auth/profile')
       .set('x-test-admin-id', '1')
-      .send({ id: 3, role: 'Super Admin', name: 'Someone else', email: 'else@example.com' });
+      .send({ id: 3, role: 'Super Admin', name: 'Someone else', username: 'someone', email: 'else@example.com' });
     assert.equal(accountSelector.status, 400);
     assert.equal(state.admins[2].name, 'Other Admin');
   });
@@ -322,7 +350,7 @@ describe('authenticated administrator profile API', () => {
     assert.equal(state.sessions.some((item) => item.session_id === 'other-user-session'), true);
     assert.notEqual(state.admins[0].password_hash, 'NewStrongPass456!');
     assert.equal(
-      (await authenticateAdmin('admin@example.com', 'NewStrongPass456!', database)).id,
+      (await authenticateAdmin('editor', 'NewStrongPass456!', database)).id,
       1
     );
     assert.equal(
@@ -331,5 +359,26 @@ describe('authenticated administrator profile API', () => {
         .set('x-test-session', 'current-admin-session')).status,
       200
     );
+  });
+
+  it('keeps email sign-in available until all existing accounts have usernames', async () => {
+    resetTestState();
+    const passwordHash = await bcrypt.hash('CurrentPass123!', 4);
+    state.admins[0].password_hash = passwordHash;
+    state.admins[2].username = null;
+    const duringRollout = await authenticateAdmin('ADMIN@example.com', 'CurrentPass123!', database);
+    assert.equal(duringRollout.id, 1);
+    assert.equal(duringRollout.username, 'editor');
+
+    state.admins[2].username = 'otheradmin';
+    await assert.rejects(
+      authenticateAdmin('ADMIN@example.com', 'CurrentPass123!', database),
+      /Invalid username or password/
+    );
+
+    state.admins[0].username = null;
+    const legacyAccount = await authenticateAdmin('ADMIN@example.com', 'CurrentPass123!', database);
+    assert.equal(legacyAccount.id, 1);
+    assert.equal(legacyAccount.username, null);
   });
 });

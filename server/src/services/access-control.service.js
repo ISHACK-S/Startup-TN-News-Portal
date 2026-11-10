@@ -7,8 +7,8 @@ function searchClause(search) {
   const escaped = search.replace(/[\\%_]/g, '\\$&');
   const pattern = `%${escaped}%`;
   return {
-    sql: " WHERE name LIKE ? ESCAPE '\\\\' OR email LIKE ? ESCAPE '\\\\'",
-    values: [pattern, pattern]
+    sql: " WHERE name LIKE ? ESCAPE '\\\\' OR username LIKE ? ESCAPE '\\\\' OR email LIKE ? ESCAPE '\\\\'",
+    values: [pattern, pattern, pattern]
   };
 }
 
@@ -19,7 +19,7 @@ export async function listAdminAccounts(query, database = pool) {
   const [[countRows], [rows]] = await Promise.all([
     database.execute(`SELECT COUNT(*) AS total FROM admins${sql}`, values),
     database.execute(
-      `SELECT id, name, email, role, is_active, created_at
+      `SELECT id, name, username, email, role, is_active, created_at
        FROM admins${sql}
        ORDER BY created_at DESC, id DESC
        LIMIT ? OFFSET ?`,
@@ -32,6 +32,7 @@ export async function listAdminAccounts(query, database = pool) {
     data: rows.map((admin) => ({
       id: admin.id,
       name: admin.name,
+      username: admin.username,
       email: admin.email,
       role: admin.role,
       isActive: Number(admin.is_active) === 1,
@@ -73,20 +74,28 @@ export async function createAdminAccount(database, input, actorAdminId) {
     }
 
     const [existing] = await database.execute(
+      'SELECT id FROM admins WHERE username = ? LIMIT 1 FOR UPDATE',
+      [input.username]
+    );
+    if (existing.length) {
+      throw new HttpError(409, 'An administrator account already uses this username.');
+    }
+
+    const [existingEmail] = await database.execute(
       'SELECT id FROM admins WHERE email = ? LIMIT 1 FOR UPDATE',
       [input.email]
     );
-    if (existing.length) {
+    if (existingEmail.length) {
       throw new HttpError(409, 'An administrator account already uses this email address.');
     }
 
     const [result] = await database.execute(
-      `INSERT INTO admins (name, email, password_hash, role, is_active)
-       VALUES (?, ?, ?, ?, ?)`,
-      [input.name, input.email, passwordHash, input.role, input.isActive ? 1 : 0]
+      `INSERT INTO admins (name, username, email, password_hash, role, is_active)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [input.name, input.username, input.email, passwordHash, input.role, input.isActive ? 1 : 0]
     );
     const [createdRows] = await database.execute(
-      `SELECT id, name, email, role, is_active, created_at
+      `SELECT id, name, username, email, role, is_active, created_at
        FROM admins WHERE id = ? LIMIT 1`,
       [result.insertId]
     );
@@ -100,6 +109,7 @@ export async function createAdminAccount(database, input, actorAdminId) {
     return {
       id: created.id,
       name: created.name,
+      username: created.username,
       email: created.email,
       role: created.role,
       isActive: Number(created.is_active) === 1,
@@ -116,7 +126,7 @@ export async function createAdminAccount(database, input, actorAdminId) {
       }
     }
     if (error.code === 'ER_DUP_ENTRY') {
-      throw new HttpError(409, 'An administrator account already uses this email address.');
+      throw new HttpError(409, 'An administrator account already uses this username or email address.');
     }
     throw error;
   }

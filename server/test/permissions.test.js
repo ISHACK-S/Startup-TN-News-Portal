@@ -185,7 +185,7 @@ function createPermissionDatabase() {
         return [[admin ? { ...admin } : undefined].filter(Boolean)];
       }
       if (
-        sql.startsWith('SELECT id, name, email, role, is_active, auth_version')
+        sql.startsWith('SELECT id, name, username, email, role, is_active, auth_version')
         && sql.includes('FROM admins WHERE id = ?')
       ) {
         const admin = state.admins.find((row) => String(row.id) === String(values[0]));

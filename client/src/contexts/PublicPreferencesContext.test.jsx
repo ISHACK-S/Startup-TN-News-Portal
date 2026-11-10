@@ -17,6 +17,10 @@ function EditorialFallback() {
   return <p>{translate('An editorial title without a verified translation')}</p>;
 }
 
+function getLanguageToggle() {
+  return screen.getByRole('button', { name: /switch language to/i });
+}
+
 function renderPublicSite(configuration = DEFAULT_PUBLIC_WEBSITE_CONFIGURATION) {
   vi.stubGlobal('fetch', vi.fn(async () => ({
     ok: true,
@@ -75,6 +79,8 @@ afterEach(async () => {
   window.localStorage.clear();
   document.documentElement.lang = 'en';
   delete document.documentElement.dataset.highContrast;
+  delete document.documentElement.dataset.theme;
+  document.documentElement.style.removeProperty('color-scheme');
   document.documentElement.style.removeProperty('--user-font-scale');
 });
 
@@ -101,6 +107,42 @@ describe('public accessibility preferences', () => {
     expect(reset).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('defaults to light regardless of the system theme and persists manual theme selections', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+    renderPublicSite();
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    const toggle = screen.getByRole('button', { name: 'Switch to dark mode' });
+    await user.click(toggle);
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    expect(window.localStorage.getItem('startuptn-public-theme')).toBe('dark');
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Switch to light mode' }));
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(window.localStorage.getItem('startuptn-public-theme')).toBe('light');
+  });
+
+  it('restores a saved dark theme regardless of the system preference', () => {
+    window.localStorage.setItem('startuptn-public-theme', 'dark');
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
+    renderPublicSite();
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    expect(screen.getByRole('button', { name: 'Switch to light mode' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('restores a saved light theme regardless of the system preference', () => {
+    window.localStorage.setItem('startuptn-public-theme', 'light');
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+    renderPublicSite();
+
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(screen.getByRole('button', { name: 'Switch to dark mode' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('toggles high contrast and switches translated interface text to Tamil', async () => {
     const user = userEvent.setup();
     renderPublicSite();
@@ -110,7 +152,8 @@ describe('public accessibility preferences', () => {
     expect(contrast).toHaveAttribute('aria-pressed', 'true');
     expect(document.documentElement).toHaveAttribute('data-high-contrast', 'true');
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Language' }), 'ta');
+    const languageToggle = getLanguageToggle();
+    await user.click(languageToggle);
     expect(document.documentElement.lang).toBe('ta');
     expect(screen.getByRole('navigation', { name: 'முதன்மை வழிசெலுத்தல்' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'அணுகல்தன்மைக் கட்டுப்பாடுகள்' })).toBeInTheDocument();
@@ -128,7 +171,7 @@ describe('public accessibility preferences', () => {
 
     await user.click(screen.getByRole('button', { name: 'Increase text size' }));
     await user.click(screen.getByRole('button', { name: 'High contrast mode' }));
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Language' }), 'ta');
+    await user.click(getLanguageToggle());
     const savedPreferences = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
     expect(savedPreferences).toEqual({ fontIndex: 3, highContrast: true, language: 'ta' });
 
@@ -146,7 +189,7 @@ describe('public accessibility preferences', () => {
     const user = userEvent.setup();
     renderPublicNavigation();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Language' }), 'ta');
+    await user.click(getLanguageToggle());
     const videosLink = await screen.findByRole('link', { name: 'காணொளிகள்' });
     await user.click(videosLink);
     expect(await screen.findByText('Videos page route')).toBeInTheDocument();

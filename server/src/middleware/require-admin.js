@@ -41,7 +41,7 @@ function loadCurrentAdmin(request, response, next, optional) {
 
   const database = request.app.locals.database ?? pool;
   database.execute(
-    `SELECT id, name, email, role, is_active, auth_version
+    `SELECT id, name, username, email, role, is_active, auth_version
      FROM admins WHERE id = ? LIMIT 1`,
     [session.adminId]
   ).then(([rows]) => {
@@ -67,6 +67,7 @@ function loadCurrentAdmin(request, response, next, optional) {
       request.admin = {
         id: account.id,
         name: account.name,
+        username: account.username,
         email: account.email,
         role: account.role,
         authVersion: Number(account.auth_version)
