@@ -28,6 +28,18 @@ const categories = [
   { id: 1, name: 'Startups', slug: 'startups', description: null },
   { id: 2, name: 'Funding', slug: 'funding', description: null }
 ];
+const startupCities = [
+  { id: 1, name: 'Chennai', slug: 'chennai', category_id: 1 },
+  { id: 2, name: 'Coimbatore', slug: 'coimbatore', category_id: 1 },
+  { id: 3, name: 'Madurai', slug: 'madurai', category_id: 1 },
+  { id: 4, name: 'Trichy', slug: 'trichy', category_id: 1 },
+  { id: 5, name: 'Salem', slug: 'salem', category_id: 1 },
+  { id: 6, name: 'Erode', slug: 'erode', category_id: 1 },
+  { id: 7, name: 'Tirunelveli', slug: 'tirunelveli', category_id: 1 },
+  { id: 8, name: 'Cuddalore', slug: 'cuddalore', category_id: 1 },
+  { id: 9, name: 'Tanjore', slug: 'tanjore', category_id: 1 },
+  { id: 10, name: 'Hosur', slug: 'hosur', category_id: 1 }
+];
 const admin = {
   id: 1,
   name: 'Test Admin',
@@ -48,9 +60,16 @@ function filterArticles(sql, values) {
     const status = params.shift();
     selected = selected.filter((article) => article.status === status);
   }
-  if (sql.includes('c.slug = ?')) {
+  if (/\bc\.slug = \?/.test(sql)) {
     const categorySlug = params.shift();
     selected = selected.filter((article) => article.category_slug === categorySlug);
+  }
+  if (sql.includes("c.slug = 'startups'")) {
+    selected = selected.filter((article) => article.category_slug === 'startups');
+  }
+  if (sql.includes('sc.slug = ?')) {
+    const citySlug = params.shift();
+    selected = selected.filter((article) => article.startup_city_slug === citySlug);
   }
   if (sql.includes('LIKE ?')) {
     const likeValues = [];
@@ -145,9 +164,16 @@ function createFakeDatabase() {
       if (sql.startsWith('SELECT id, name, slug, description FROM categories')) {
         return [[...categories]];
       }
+      if (sql.startsWith('SELECT sc.id, sc.name, sc.slug')) {
+        return [[...startupCities.map(({ id, name, slug }) => ({ id, name, slug }))]];
+      }
+      if (sql.includes('FROM startup_city_subcategories sc') && sql.includes('WHERE sc.id = ?')) {
+        const city = startupCities.find((entry) => entry.id === Number(values[0]));
+        return [[city ? { id: city.id } : undefined].filter(Boolean)];
+      }
       if (sql.includes('FROM categories WHERE id = ?')) {
         const category = categories.find((entry) => entry.id === Number(values[0]));
-        return [[category ? { id: category.id } : undefined].filter(Boolean)];
+        return [[category ? { id: category.id, slug: category.slug } : undefined].filter(Boolean)];
       }
       if (sql.startsWith('SELECT COUNT(*) AS total FROM articles')) {
         const { selected } = filterArticles(sql, values);
@@ -156,6 +182,14 @@ function createFakeDatabase() {
       if (sql.startsWith('SELECT id FROM articles WHERE id = ?')) {
         const article = articles.find((entry) => entry.id === Number(values[0]));
         return [[article ? { id: article.id } : undefined].filter(Boolean)];
+      }
+      if (sql.startsWith('SELECT id, category_id, startup_city_id FROM articles WHERE id = ?')) {
+        const article = articles.find((entry) => entry.id === Number(values[0]));
+        return [[article ? {
+          id: article.id,
+          category_id: article.category_id,
+          startup_city_id: article.startup_city_id ?? null
+        } : undefined].filter(Boolean)];
       }
       if (sql.includes('FROM articles a') && sql.includes('WHERE a.id = ?')) {
         const article = articles.find((entry) => entry.id === Number(values[0]));
@@ -183,7 +217,7 @@ function createFakeDatabase() {
       }
       if (sql.startsWith('INSERT INTO articles')) {
         const [
-          title, slug, summary, content, coverImageUrl, sourceUrl, categoryId,
+          title, slug, summary, content, coverImageUrl, sourceUrl, categoryId, startupCityId,
           authorName, adminId, status, isFeatured, publishedAt
         ] = values;
         if (articles.some((article) => article.slug === slug)) {
@@ -192,10 +226,13 @@ function createFakeDatabase() {
           throw error;
         }
         const category = categories.find((entry) => entry.id === categoryId);
+        const city = startupCities.find((entry) => entry.id === startupCityId);
         const inserted = {
           id: Math.max(0, ...articles.map((article) => article.id)) + 1,
           title, slug, summary, content, cover_image_url: coverImageUrl, source_url: sourceUrl,
           category_id: categoryId, category_name: category.name, category_slug: category.slug,
+          startup_city_id: startupCityId, startup_city_name: city?.name ?? null,
+          startup_city_slug: city?.slug ?? null,
           author_name: authorName, admin_id: adminId, status, is_featured: isFeatured,
           published_at: publishedAt, created_at: new Date(), updated_at: new Date()
         };
@@ -217,6 +254,11 @@ function createFakeDatabase() {
               const category = categories.find((entry) => entry.id === value);
               article.category_name = category.name;
               article.category_slug = category.slug;
+            }
+            if (name === 'startup_city_id') {
+              const city = startupCities.find((entry) => entry.id === value);
+              article.startup_city_name = city?.name ?? null;
+              article.startup_city_slug = city?.slug ?? null;
             }
             if (name === 'status' && value === 'draft') article.published_at = null;
           } else if (name === 'published_at' && field.endsWith('CURRENT_TIMESTAMP)')) {
@@ -459,10 +501,87 @@ describe('admin authentication and article API', () => {
     assert.equal(missing.status, 404);
   });
 
+  it('creates, filters, edits, and clears optional Startup city assignments', async () => {
+    const agent = request.agent(app);
+    await agent.post('/api/auth/login').send({ username: admin.username, password: 'correct-test-password' });
+
+    const cities = await request(app).get('/api/startup-cities');
+    assert.equal(cities.status, 200);
+    assert.equal(cities.body.data.length, 10);
+
+    const createStartup = (title, slug, startup_city_id = null) => agent.post('/api/admin/articles').send({
+      title,
+      slug,
+      summary: `${title} summary`,
+      content: `${title} body`,
+      category_id: 1,
+      startup_city_id,
+      author_name: 'Reporter',
+      status: 'published'
+    });
+    const unassigned = await createStartup('Unassigned startup story', 'unassigned-startup-story');
+    const chennai = await createStartup('Chennai startup story', 'chennai-startup-story', 1);
+    const coimbatore = await createStartup('Coimbatore startup story', 'coimbatore-startup-story', 2);
+    assert.equal(unassigned.status, 201);
+    assert.equal(unassigned.body.data.startup_city_id, null);
+    assert.equal(chennai.status, 201);
+    assert.equal(chennai.body.data.startup_city_name, 'Chennai');
+    assert.equal(coimbatore.status, 201);
+    assert.equal(coimbatore.body.data.startup_city_slug, 'coimbatore');
+
+    const allStartupStories = await request(app).get('/api/news?category=startups&limit=50');
+    const startupSlugs = allStartupStories.body.data.map((article) => article.slug);
+    assert.ok(startupSlugs.includes('unassigned-startup-story'));
+    assert.ok(startupSlugs.includes('chennai-startup-story'));
+    assert.ok(startupSlugs.includes('coimbatore-startup-story'));
+
+    const chennaiStories = await request(app).get('/api/news?city=chennai');
+    assert.deepEqual(
+      chennaiStories.body.data.map((article) => article.slug),
+      ['chennai-startup-story'],
+      JSON.stringify(chennaiStories.body)
+    );
+    const coimbatoreStories = await request(app).get('/api/news?category=startups&city=coimbatore');
+    assert.deepEqual(coimbatoreStories.body.data.map((article) => article.slug), ['coimbatore-startup-story']);
+    const articleDetail = await request(app).get('/api/news/chennai-startup-story');
+    assert.equal(articleDetail.body.data.startup_city_name, 'Chennai');
+
+    const assignedToExisting = await agent.patch('/api/admin/articles/').send({
+      id: unassigned.body.data.id,
+      startup_city_id: 3
+    });
+    assert.equal(assignedToExisting.status, 200);
+    assert.equal(assignedToExisting.body.data.startup_city_name, 'Madurai');
+
+    const invalidCity = await createStartup('Invalid city story', 'invalid-city-story', 999);
+    assert.equal(invalidCity.status, 400);
+    const cityOnOtherCategory = await agent.post('/api/admin/articles').send({
+      title: 'Funding city story',
+      slug: 'funding-city-story',
+      summary: 'Funding summary',
+      content: 'Funding body',
+      category_id: 2,
+      startup_city_id: 1,
+      author_name: 'Reporter'
+    });
+    assert.equal(cityOnOtherCategory.status, 400);
+
+    const changedCategory = await agent.patch('/api/admin/articles/').send({
+      id: chennai.body.data.id,
+      category_id: 2
+    });
+    assert.equal(changedCategory.status, 200);
+    assert.equal(changedCategory.body.data.category_slug, 'funding');
+    assert.equal(changedCategory.body.data.startup_city_id, null);
+  });
+
   it('returns categories and clears the authenticated session on logout', async () => {
     const categoryResponse = await request(app).get('/api/categories');
     assert.equal(categoryResponse.status, 200);
     assert.equal(categoryResponse.body.data.length, 2);
+    const cityResponse = await request(app).get('/api/startup-cities');
+    assert.equal(cityResponse.status, 200);
+    assert.equal(cityResponse.body.data.length, 10);
 
     const agent = request.agent(app);
     await agent.post('/api/auth/login').send({ username: admin.username, password: 'correct-test-password' });

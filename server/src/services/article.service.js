@@ -9,6 +9,7 @@ const ARTICLE_FIELDS = [
   'cover_image_url',
   'source_url',
   'category_id',
+  'startup_city_id',
   'author_name',
   'status',
   'is_featured'
@@ -52,6 +53,11 @@ function filtersFor(query, { publicOnly = false } = {}) {
     values.push(query.category);
   }
 
+  if (query.city) {
+    clauses.push("c.slug = 'startups'", 'sc.slug = ?');
+    values.push(query.city);
+  }
+
   const search = searchClause(query.q, ['a.title', 'a.summary', 'a.content']);
   return {
     sql: `${clauses.length ? `WHERE ${clauses.join(' AND ')}` : 'WHERE 1 = 1'}${search.sql}`,
@@ -62,18 +68,24 @@ function filtersFor(query, { publicOnly = false } = {}) {
 function articleSelect() {
   return `SELECT a.id, a.title, a.slug, a.summary, a.content, a.cover_image_url,
                  a.source_url, a.category_id, c.name AS category_name, c.slug AS category_slug,
+                 a.startup_city_id, sc.name AS startup_city_name, sc.slug AS startup_city_slug,
                  a.author_name, a.admin_id, a.status, a.is_featured, a.published_at,
                  a.created_at, a.updated_at
           FROM articles a
-          INNER JOIN categories c ON c.id = a.category_id`;
+          INNER JOIN categories c ON c.id = a.category_id
+          LEFT JOIN startup_city_subcategories sc
+            ON sc.id = a.startup_city_id AND sc.category_id = a.category_id`;
 }
 
 function publicArticleSelect() {
   return `SELECT a.id, a.title, a.slug, a.summary, a.content, a.cover_image_url,
                  a.source_url, a.category_id, c.name AS category_name, c.slug AS category_slug,
+                 a.startup_city_id, sc.name AS startup_city_name, sc.slug AS startup_city_slug,
                  a.author_name, a.is_featured, a.published_at, a.created_at, a.updated_at
           FROM articles a
-          INNER JOIN categories c ON c.id = a.category_id`;
+          INNER JOIN categories c ON c.id = a.category_id
+          LEFT JOIN startup_city_subcategories sc
+            ON sc.id = a.startup_city_id AND sc.category_id = a.category_id`;
 }
 
 export async function listCategories(database = pool) {
@@ -83,11 +95,26 @@ export async function listCategories(database = pool) {
   return rows;
 }
 
+export async function listStartupCities(database = pool) {
+  const [rows] = await database.execute(
+    `SELECT sc.id, sc.name, sc.slug
+     FROM startup_city_subcategories sc
+     INNER JOIN categories c ON c.id = sc.category_id
+     WHERE c.slug = 'startups'
+     ORDER BY sc.id ASC`
+  );
+  return rows;
+}
+
 export async function listPublicArticles(query, database = pool) {
   const filters = filtersFor(query, { publicOnly: true });
   const offset = (query.page - 1) * query.limit;
   const [[countRow]] = await database.execute(
-    `SELECT COUNT(*) AS total FROM articles a INNER JOIN categories c ON c.id = a.category_id ${filters.sql}`,
+    `SELECT COUNT(*) AS total FROM articles a
+     INNER JOIN categories c ON c.id = a.category_id
+     LEFT JOIN startup_city_subcategories sc
+       ON sc.id = a.startup_city_id AND sc.category_id = a.category_id
+     ${filters.sql}`,
     filters.values
   );
   const [articles] = await database.execute(
@@ -107,7 +134,11 @@ export async function listAdminArticles(query, database = pool) {
   const filters = filtersFor(query);
   const offset = (query.page - 1) * query.limit;
   const [[countRow]] = await database.execute(
-    `SELECT COUNT(*) AS total FROM articles a INNER JOIN categories c ON c.id = a.category_id ${filters.sql}`,
+    `SELECT COUNT(*) AS total FROM articles a
+     INNER JOIN categories c ON c.id = a.category_id
+     LEFT JOIN startup_city_subcategories sc
+       ON sc.id = a.startup_city_id AND sc.category_id = a.category_id
+     ${filters.sql}`,
     filters.values
   );
   const [articles] = await database.execute(
@@ -139,14 +170,19 @@ export async function getAdminArticle(id, database = pool) {
 }
 
 export async function createArticle(article, adminId, database = pool) {
-  await requireCategory(article.category_id, database);
+  const category = await requireCategory(article.category_id, database);
+  const startupCityId = await resolveStartupCity(
+    article.startup_city_id ?? null,
+    category.slug,
+    database
+  );
   const publishedAt = article.status === 'published' ? new Date() : null;
   try {
     const [result] = await database.execute(
       `INSERT INTO articles
          (title, slug, summary, content, cover_image_url, source_url, category_id,
-          author_name, admin_id, status, is_featured, published_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          startup_city_id, author_name, admin_id, status, is_featured, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         article.title,
         article.slug,
@@ -155,6 +191,7 @@ export async function createArticle(article, adminId, database = pool) {
         article.cover_image_url ?? null,
         article.source_url ?? null,
         article.category_id,
+        startupCityId,
         article.author_name,
         adminId,
         article.status,
@@ -170,13 +207,34 @@ export async function createArticle(article, adminId, database = pool) {
 }
 
 export async function updateArticle({ id, ...updates }, database = pool) {
-  const [existingRows] = await database.execute('SELECT id FROM articles WHERE id = ? LIMIT 1', [id]);
+  const [existingRows] = await database.execute(
+    'SELECT id, category_id, startup_city_id FROM articles WHERE id = ? LIMIT 1',
+    [id]
+  );
   const existing = existingRows[0];
   if (!existing) {
     throw new HttpError(404, 'Article not found.');
   }
-  if (updates.category_id !== undefined) {
-    await requireCategory(updates.category_id, database);
+  const category = await requireCategory(updates.category_id ?? existing.category_id, database);
+  const cityWasProvided = Object.hasOwn(updates, 'startup_city_id');
+  const requestedCityId = cityWasProvided
+    ? updates.startup_city_id
+    : existing.startup_city_id;
+  if (category.slug !== 'startups') {
+    if (cityWasProvided && requestedCityId != null) {
+      throw new HttpError(400, 'City subcategories are only available for Startup articles.');
+    }
+    if (existing.startup_city_id != null || cityWasProvided) {
+      updates.startup_city_id = null;
+    }
+  } else if (requestedCityId != null) {
+    updates.startup_city_id = await resolveStartupCity(
+      requestedCityId,
+      category.slug,
+      database
+    );
+  } else if (Object.hasOwn(updates, 'startup_city_id')) {
+    updates.startup_city_id = null;
   }
 
   const fields = ARTICLE_FIELDS.filter((field) => Object.hasOwn(updates, field));
@@ -217,10 +275,33 @@ async function getArticleById(id, database) {
 }
 
 async function requireCategory(categoryId, database) {
-  const [rows] = await database.execute('SELECT id FROM categories WHERE id = ? LIMIT 1', [categoryId]);
+  const [rows] = await database.execute(
+    'SELECT id, slug FROM categories WHERE id = ? LIMIT 1',
+    [categoryId]
+  );
   if (!rows[0]) {
     throw new HttpError(400, 'The selected category does not exist.');
   }
+  return rows[0];
+}
+
+async function resolveStartupCity(cityId, categorySlug, database) {
+  if (cityId == null) return null;
+  if (categorySlug !== 'startups') {
+    throw new HttpError(400, 'City subcategories are only available for Startup articles.');
+  }
+  const [rows] = await database.execute(
+    `SELECT sc.id
+     FROM startup_city_subcategories sc
+     INNER JOIN categories c ON c.id = sc.category_id
+     WHERE sc.id = ? AND c.slug = 'startups'
+     LIMIT 1`,
+    [cityId]
+  );
+  if (!rows[0]) {
+    throw new HttpError(400, 'The selected Startup city subcategory does not exist.');
+  }
+  return rows[0].id;
 }
 
 function translateArticleWriteError(error) {
@@ -228,7 +309,11 @@ function translateArticleWriteError(error) {
     return new HttpError(409, 'An article with this slug already exists.');
   }
   if (error.code === 'ER_NO_REFERENCED_ROW_2') {
-    return new HttpError(400, 'The selected category does not exist.', { cause: error });
+    return new HttpError(
+      400,
+      'The selected category or Startup city subcategory does not exist.',
+      { cause: error }
+    );
   }
   return error;
 }

@@ -82,6 +82,16 @@ function PublicMenuItem({ item, language, onNavigate, activeCategory, activePath
   );
 }
 
+function handleBackToTop(event) {
+  event.preventDefault();
+  const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  window.scrollTo({
+    top: 0,
+    left: 0,
+    behavior: prefersReducedMotion ? 'instant' : 'smooth'
+  });
+}
+
 export default function SiteLayout() {
   const { t: tI18n } = useTranslation('public');
   const [query, setQuery] = useState('');
@@ -277,7 +287,9 @@ export default function SiteLayout() {
             <span>{tI18n("©", { defaultValue: "©" })} {footer.dynamicYear ? new Date().getFullYear() : ''}
               {language === 'ta' ? footer.copyrightTa : footer.copyrightEn}
             </span>
-            <Link to="/">{t('Back to top')} <span aria-hidden="true">{tI18n("↑", { defaultValue: "↑" })}</span></Link>
+            <Link to="/" onClick={handleBackToTop}>
+              {t('Back to top')} <span aria-hidden="true">{tI18n("↑", { defaultValue: "↑" })}</span>
+            </Link>
           </div>
         </div>
       </footer>}

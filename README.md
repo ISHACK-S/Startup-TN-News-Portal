@@ -102,6 +102,19 @@ SELECT COUNT(*) AS accounts_without_username FROM admins WHERE username IS NULL;
 
 Do not make `username` NOT NULL until every existing administrator has a unique username. The application does not automatically run this migration.
 
+### Startup city subcategories
+
+The existing `startups` category can optionally be assigned one of ten city subcategories. For an existing database, back it up and manually execute `database/migrations/013_startup_city_subcategories.sql` against the intended MySQL database before deploying this application version. The migration adds the city lookup table and a nullable article reference, seeds the city list under the existing Startup category, and leaves existing article rows and assignments unchanged. Do not run it against Aiven automatically or through the unrelated authorization migration command.
+
+Verify the seeded cities and that existing articles remain unassigned with:
+
+```sql
+SELECT name, slug FROM startup_city_subcategories ORDER BY id;
+SELECT COUNT(*) AS articles_with_city FROM articles WHERE startup_city_id IS NOT NULL;
+```
+
+New databases receive the same relationship and seed data from `database/schema.sql`. Articles can remain city-unassigned; the Startup category's All Categories filter includes those articles.
+
 To update the email and password of an existing administrator, run this from the repository root in an interactive terminal:
 
 ```powershell

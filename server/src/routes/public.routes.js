@@ -2,7 +2,8 @@ import { Router } from 'express';
 import {
   categoriesController,
   publicArticleController,
-  publicNewsController
+  publicNewsController,
+  startupCitiesController
 } from '../controllers/article.controller.js';
 import {
   publicFeaturedVideoController,
@@ -31,6 +32,7 @@ export const publicRouter = Router();
 
 publicRouter.get('/site-config', publicWebsiteConfigurationController);
 publicRouter.get('/categories', categoriesController);
+publicRouter.get('/startup-cities', startupCitiesController);
 publicRouter.get('/hero-slides', validate(heroListQuerySchema, 'query'), publicHeroSlidesController);
 publicRouter.get('/videos/categories', publicVideoCategoriesController);
 publicRouter.get('/videos/featured', publicFeaturedVideoController);

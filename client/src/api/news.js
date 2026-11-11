@@ -31,14 +31,19 @@ export function getCategories({ signal } = {}) {
   return request('/categories', { signal }).then((result) => result.data);
 }
 
+export function getStartupCities({ signal } = {}) {
+  return request('/startup-cities', { signal }).then((result) => result.data);
+}
+
 export function getPublicWebsiteConfiguration({ signal } = {}) {
   return request('/site-config', { signal }).then((result) => result.data);
 }
 
-export function getNews({ page = 1, limit = 9, q, category, signal } = {}) {
+export function getNews({ page = 1, limit = 9, q, category, city, signal } = {}) {
   const search = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (q) search.set('q', q);
   if (category) search.set('category', category);
+  if (city) search.set('city', city);
   return request(`/news?${search.toString()}`, { signal });
 }
 

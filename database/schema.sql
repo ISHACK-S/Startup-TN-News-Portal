@@ -41,6 +41,22 @@ CREATE TABLE IF NOT EXISTS categories (
   DEFAULT CHARACTER SET=utf8mb4
   COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS startup_city_subcategories (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  category_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(120) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_startup_city_category_slug (category_id, slug),
+  UNIQUE KEY uq_startup_city_id_category (id, category_id),
+  CONSTRAINT fk_startup_city_category
+    FOREIGN KEY (category_id) REFERENCES categories (id)
+    ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB
+  DEFAULT CHARACTER SET=utf8mb4
+  COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS articles (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   title VARCHAR(255) NOT NULL,
@@ -50,6 +66,7 @@ CREATE TABLE IF NOT EXISTS articles (
   cover_image_url VARCHAR(2048) NULL,
   source_url VARCHAR(2048) NULL,
   category_id BIGINT UNSIGNED NOT NULL,
+  startup_city_id BIGINT UNSIGNED NULL,
   author_name VARCHAR(150) NOT NULL,
   admin_id BIGINT UNSIGNED NULL,
   status ENUM('draft', 'published') NOT NULL DEFAULT 'draft',
@@ -60,11 +77,17 @@ CREATE TABLE IF NOT EXISTS articles (
   PRIMARY KEY (id),
   UNIQUE KEY uq_articles_slug (slug),
   KEY idx_articles_category_id (category_id),
+  KEY idx_articles_startup_city_category (startup_city_id, category_id),
   KEY idx_articles_admin_id (admin_id),
   KEY idx_articles_status_published_at (status, published_at),
   KEY idx_articles_featured_published_at (is_featured, published_at),
   CONSTRAINT fk_articles_category
     FOREIGN KEY (category_id) REFERENCES categories (id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT,
+  CONSTRAINT fk_articles_startup_city_category
+    FOREIGN KEY (startup_city_id, category_id)
+    REFERENCES startup_city_subcategories (id, category_id)
     ON UPDATE CASCADE
     ON DELETE RESTRICT,
   CONSTRAINT fk_articles_admin
@@ -88,3 +111,21 @@ INSERT INTO categories (name, slug) VALUES
   ('Innovation', 'innovation'),
   ('Ecosystem', 'ecosystem')
 ON DUPLICATE KEY UPDATE name = name;
+
+INSERT INTO startup_city_subcategories (category_id, name, slug)
+SELECT categories.id, cities.name, cities.slug
+FROM categories
+CROSS JOIN (
+  SELECT 'Chennai' AS name, 'chennai' AS slug
+  UNION ALL SELECT 'Coimbatore', 'coimbatore'
+  UNION ALL SELECT 'Madurai', 'madurai'
+  UNION ALL SELECT 'Trichy', 'trichy'
+  UNION ALL SELECT 'Salem', 'salem'
+  UNION ALL SELECT 'Erode', 'erode'
+  UNION ALL SELECT 'Tirunelveli', 'tirunelveli'
+  UNION ALL SELECT 'Cuddalore', 'cuddalore'
+  UNION ALL SELECT 'Tanjore', 'tanjore'
+  UNION ALL SELECT 'Hosur', 'hosur'
+) AS cities
+WHERE categories.slug = 'startups'
+ON DUPLICATE KEY UPDATE name = VALUES(name);

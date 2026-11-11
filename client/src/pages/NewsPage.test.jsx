@@ -9,6 +9,18 @@ const categories = [
   { id: 1, name: 'Startups', slug: 'startups' },
   { id: 2, name: 'Funding', slug: 'funding' }
 ];
+const startupCities = [
+  { id: 1, name: 'Chennai', slug: 'chennai' },
+  { id: 2, name: 'Coimbatore', slug: 'coimbatore' },
+  { id: 3, name: 'Madurai', slug: 'madurai' },
+  { id: 4, name: 'Trichy', slug: 'trichy' },
+  { id: 5, name: 'Salem', slug: 'salem' },
+  { id: 6, name: 'Erode', slug: 'erode' },
+  { id: 7, name: 'Tirunelveli', slug: 'tirunelveli' },
+  { id: 8, name: 'Cuddalore', slug: 'cuddalore' },
+  { id: 9, name: 'Tanjore', slug: 'tanjore' },
+  { id: 10, name: 'Hosur', slug: 'hosur' }
+];
 
 const articles = [
   {
@@ -56,6 +68,9 @@ function installApiMock(newsArticles = articles) {
     if (url.pathname === '/api/categories') {
       return jsonResponse({ data: categories });
     }
+    if (url.pathname === '/api/startup-cities') {
+      return jsonResponse({ data: startupCities });
+    }
     if (url.pathname === '/api/site-config') {
       return jsonResponse({ data: DEFAULT_PUBLIC_WEBSITE_CONFIGURATION });
     }
@@ -69,6 +84,7 @@ function installApiMock(newsArticles = articles) {
       let filtered = [...newsArticles];
       const q = url.searchParams.get('q')?.toLowerCase();
       const category = url.searchParams.get('category');
+      const city = url.searchParams.get('city');
       const page = Number(url.searchParams.get('page') ?? 1);
       const limit = Number(url.searchParams.get('limit') ?? 9);
       if (q) {
@@ -77,6 +93,7 @@ function installApiMock(newsArticles = articles) {
         );
       }
       if (category) filtered = filtered.filter((article) => article.category_slug === category);
+      if (city) filtered = filtered.filter((article) => article.startup_city_slug === city);
       const total = filtered.length;
       return jsonResponse({
         data: filtered.slice((page - 1) * limit, page * limit),
@@ -452,6 +469,60 @@ describe('public news experience', () => {
     expect(await screen.findByText(articles[0].title)).toBeInTheDocument();
     expect(screen.queryByText(articles[1].title)).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('q=local+needs'), expect.any(Object));
+  });
+
+  it('filters Startup stories by city through the public news API and keeps unassigned stories in All Categories', async () => {
+    const startupStories = [
+      { ...articles[0], startup_city_id: null, startup_city_slug: null },
+      {
+        ...articles[0],
+        id: 13,
+        title: 'Chennai startup report',
+        slug: 'chennai-startup-report',
+        startup_city_id: 1,
+        startup_city_slug: 'chennai'
+      },
+      {
+        ...articles[0],
+        id: 14,
+        title: 'Coimbatore startup report',
+        slug: 'coimbatore-startup-report',
+        startup_city_id: 2,
+        startup_city_slug: 'coimbatore'
+      }
+    ];
+    const fetchMock = installApiMock(startupStories);
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={['/news/?category=startups']}><App /></MemoryRouter>);
+
+    const cityNavigation = await screen.findByRole('navigation', { name: 'Filter by Startup city' });
+    expect(within(cityNavigation).getByRole('button', { name: 'All Categories' })).toHaveAttribute('aria-pressed', 'true');
+    expect(await screen.findByText('Chennai startup report')).toBeInTheDocument();
+    expect(screen.getByText('Coimbatore startup report')).toBeInTheDocument();
+    expect(screen.getByText(startupStories[0].title)).toBeInTheDocument();
+
+    await user.click(within(cityNavigation).getByRole('button', { name: 'Chennai' }));
+    expect(await screen.findByText('Chennai startup report')).toBeInTheDocument();
+    expect(screen.queryByText('Coimbatore startup report')).not.toBeInTheDocument();
+    expect(screen.queryByText(startupStories[0].title)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('city=chennai'),
+        expect.any(Object)
+      );
+    });
+
+    await user.click(within(cityNavigation).getByRole('button', { name: 'Coimbatore' }));
+    expect(await screen.findByText('Coimbatore startup report')).toBeInTheDocument();
+    expect(screen.queryByText('Chennai startup report')).not.toBeInTheDocument();
+
+    await user.click(within(cityNavigation).getByRole('button', { name: 'Madurai' }));
+    expect(await screen.findByText('No stories match those filters.')).toBeInTheDocument();
+
+    await user.click(within(cityNavigation).getByRole('button', { name: 'All Categories' }));
+    expect(await screen.findByText(startupStories[0].title)).toBeInTheDocument();
+    expect(screen.getByText('Chennai startup report')).toBeInTheDocument();
+    expect(screen.getByText('Coimbatore startup report')).toBeInTheDocument();
   });
 
   it('navigates to a published article and renders attribution and share links', async () => {

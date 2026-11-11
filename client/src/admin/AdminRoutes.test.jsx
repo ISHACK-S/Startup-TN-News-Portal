@@ -9,6 +9,18 @@ const categoryData = [
   { id: 1, name: 'Startups', slug: 'startups' },
   { id: 2, name: 'Funding', slug: 'funding' }
 ];
+const startupCityData = [
+  { id: 1, name: 'Chennai', slug: 'chennai' },
+  { id: 2, name: 'Coimbatore', slug: 'coimbatore' },
+  { id: 3, name: 'Madurai', slug: 'madurai' },
+  { id: 4, name: 'Trichy', slug: 'trichy' },
+  { id: 5, name: 'Salem', slug: 'salem' },
+  { id: 6, name: 'Erode', slug: 'erode' },
+  { id: 7, name: 'Tirunelveli', slug: 'tirunelveli' },
+  { id: 8, name: 'Cuddalore', slug: 'cuddalore' },
+  { id: 9, name: 'Tanjore', slug: 'tanjore' },
+  { id: 10, name: 'Hosur', slug: 'hosur' }
+];
 let sessionActive;
 let storedArticles;
 let nextArticleId;
@@ -265,6 +277,7 @@ function installApi() {
       return apiResponse({ data: { changed: true }, meta: { otherSessionsInvalidated: 2 } });
     }
     if (url.pathname === '/api/categories') return apiResponse({ data: categoryData });
+    if (url.pathname === '/api/startup-cities') return apiResponse({ data: startupCityData });
     if (!sessionActive && url.pathname.startsWith('/api/admin/')) {
       return apiResponse({ error: { message: 'Authentication is required.' } }, 401);
     }
@@ -1495,6 +1508,7 @@ describe('admin CMS', () => {
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('Draft saved successfully.')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole('button', { name: 'Publish article' })).toBeEnabled());
+    await waitFor(() => expect(screen.getByLabelText(/^Headline/)).toHaveValue('A founder builds for Tamil Nadu'));
     expect(storedArticles[0]).toMatchObject({
       title: 'A founder builds for Tamil Nadu',
       status: 'draft',
@@ -1515,6 +1529,45 @@ describe('admin CMS', () => {
     expect(storedArticles[0].published_at).toBeTruthy();
     expect(await screen.findByText('Article published successfully.')).toBeInTheDocument();
   }, 10000);
+
+  it('creates Startup stories with an optional city and clears the city when the category changes', async () => {
+    const user = userEvent.setup();
+    renderApp('/admin/news/new');
+    await signIn(user);
+
+    await user.type(await screen.findByLabelText(/^Headline/), 'Startup city workflow');
+    await user.type(screen.getByLabelText(/^Summary/), 'Optional city summary.');
+    await user.type(screen.getByLabelText(/^Full article/), 'Verified article text.');
+    await user.type(screen.getByLabelText(/^Author name/), 'Editorial Desk');
+    const citySelect = screen.getByLabelText('City / Subcategory');
+    expect(citySelect).toHaveValue('');
+    await user.selectOptions(citySelect, '1');
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    await waitFor(() => {
+      expect(storedArticles.find((item) => item.slug === 'startup-city-workflow'))
+        .toMatchObject({ category_id: 1, startup_city_id: 1 });
+    });
+  });
+
+  it('loads the saved city when editing an existing Startup article', async () => {
+    storedArticles[0].startup_city_id = 2;
+    storedArticles[0].startup_city_name = 'Coimbatore';
+    storedArticles[0].startup_city_slug = 'coimbatore';
+    const user = userEvent.setup();
+    renderApp('/admin/news/1/edit');
+    await signIn(user);
+
+    expect(await screen.findByLabelText('City / Subcategory')).toHaveValue('2');
+    await user.selectOptions(screen.getByLabelText('City / Subcategory'), '1');
+    await user.click(screen.getByRole('button', { name: 'Save & publish' }));
+    await waitFor(() => expect(storedArticles[0].startup_city_id).toBe(1));
+
+    await user.selectOptions(screen.getByLabelText(/^Category/), '2');
+    expect(screen.queryByLabelText('City / Subcategory')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save & publish' }));
+    await waitFor(() => expect(storedArticles[0]).toMatchObject({ category_id: 2, startup_city_id: null }));
+  });
 
   it('uploads a validated image with session credentials and progress, then stores the hosted URL', async () => {
     vi.stubGlobal('XMLHttpRequest', MockUploadRequest);

@@ -10,7 +10,7 @@ import { createInlineImageMarkup, isAllowedInlineImageUrl } from '../../utils/ar
 import { AdminError, AdminLoading } from '../components/AdminStates.jsx';
 import MediaLibraryPicker from '../components/MediaLibraryPicker.jsx';
 import { useAdminPermissions } from '../AdminPermissionContext.jsx';
-import { getCategories, getPublicVideos } from '../../api/news.js';
+import { getCategories, getPublicVideos, getStartupCities } from '../../api/news.js';
 
 const EMPTY_ARTICLE = {
   title: '',
@@ -20,6 +20,7 @@ const EMPTY_ARTICLE = {
   cover_image_url: null,
   source_url: null,
   category_id: '',
+  startup_city_id: null,
   author_name: '',
   is_featured: false
 };
@@ -47,6 +48,7 @@ export default function AdminArticleEditorPage() {
   const isEditing = Boolean(id);
   const [article, setArticle] = useState(EMPTY_ARTICLE);
   const [categories, setCategories] = useState([]);
+  const [startupCities, setStartupCities] = useState([]);
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -127,10 +129,12 @@ export default function AdminArticleEditorPage() {
 
     Promise.all([
       getCategories({ signal: controller.signal }),
+      getStartupCities({ signal: controller.signal }),
       isEditing ? getAdminArticle(id, { signal: controller.signal }) : Promise.resolve(null)
     ])
-      .then(([availableCategories, existingArticle]) => {
+      .then(([availableCategories, availableStartupCities, existingArticle]) => {
         setCategories(availableCategories);
+        setStartupCities(availableStartupCities);
         if (existingArticle) {
           setArticle({
             title: existingArticle.title,
@@ -140,6 +144,7 @@ export default function AdminArticleEditorPage() {
             cover_image_url: existingArticle.cover_image_url,
             source_url: existingArticle.source_url,
             category_id: existingArticle.category_id,
+            startup_city_id: existingArticle.startup_city_id ?? null,
             author_name: existingArticle.author_name,
             is_featured: Boolean(existingArticle.is_featured),
             status: existingArticle.status
@@ -162,6 +167,11 @@ export default function AdminArticleEditorPage() {
 
     return () => controller.abort();
   }, [id, isEditing, attempt]);
+
+  const selectedCategory = categories.find(
+    (category) => Number(category.id) === Number(article.category_id)
+  );
+  const isStartupArticle = selectedCategory?.slug === 'startups';
 
   const previewArticle = useMemo(() => ({
     ...article,
@@ -318,6 +328,9 @@ export default function AdminArticleEditorPage() {
       cover_image_url: article.cover_image_url || null,
       source_url: article.source_url?.trim() || null,
       category_id: Number(article.category_id),
+      startup_city_id: isStartupArticle && article.startup_city_id
+        ? Number(article.startup_city_id)
+        : null,
       author_name: article.author_name.trim(),
       is_featured: Boolean(article.is_featured),
       status
@@ -539,7 +552,16 @@ export default function AdminArticleEditorPage() {
               <select
                 required
                 value={article.category_id}
-                onChange={(event) => updateField('category_id', event.target.value)}
+                onChange={(event) => {
+                  const categoryId = event.target.value;
+                  const category = categories.find((item) => Number(item.id) === Number(categoryId));
+                  setArticle((current) => ({
+                    ...current,
+                    category_id: categoryId,
+                    ...(category?.slug === 'startups' ? {} : { startup_city_id: null })
+                  }));
+                  setNotice('');
+                }}
               >
                 <option value="" disabled>{tI18n("Select a category", { defaultValue: "Select a category" })}</option>
                 {categories.map((category) => (
@@ -547,6 +569,23 @@ export default function AdminArticleEditorPage() {
                 ))}
               </select>
             </label>
+            {isStartupArticle && (
+              <label className="admin-field">
+                <span>{tI18n("City / Subcategory", { defaultValue: "City / Subcategory" })}</span>
+                <select
+                  value={article.startup_city_id ?? ''}
+                  onChange={(event) => updateField(
+                    'startup_city_id',
+                    event.target.value ? Number(event.target.value) : null
+                  )}
+                >
+                  <option value="">{tI18n("No specific city", { defaultValue: "No specific city" })}</option>
+                  {startupCities.map((city) => (
+                    <option value={city.id} key={city.id}>{city.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="admin-field">
               <span>{tI18n("Author name", { defaultValue: "Author name" })} <b aria-hidden="true">{tI18n("*", { defaultValue: "*" })}</b></span>
               <input

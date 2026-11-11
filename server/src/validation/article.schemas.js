@@ -27,6 +27,7 @@ export const articleCreateSchema = z.object({
   cover_image_url: optionalUrlSchema,
   source_url: optionalUrlSchema,
   category_id: z.number().int().positive(),
+  startup_city_id: z.number().int().positive().nullable().optional(),
   author_name: z.string().trim().min(1).max(150),
   status: z.enum(['draft', 'published']).default('draft'),
   is_featured: z.boolean().default(false)
@@ -42,6 +43,7 @@ export const articlePatchSchema = z
     cover_image_url: optionalUrlSchema,
     source_url: optionalUrlSchema,
     category_id: z.number().int().positive().optional(),
+    startup_city_id: z.number().int().positive().nullable().optional(),
     author_name: z.string().trim().min(1).max(150).optional(),
     status: z.enum(['draft', 'published']).optional(),
     is_featured: z.boolean().optional()
@@ -63,6 +65,7 @@ export const articleListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(10),
   q: z.string().trim().max(200).optional(),
   category: categorySlugSchema.optional(),
+  city: categorySlugSchema.optional(),
   status: z.enum(['draft', 'published']).optional()
 });
 

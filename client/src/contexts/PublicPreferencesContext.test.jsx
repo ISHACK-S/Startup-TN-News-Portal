@@ -60,6 +60,8 @@ function renderPublicNavigation(initialEntry = '/') {
           <Routes>
             <Route element={<SiteLayout />}>
               <Route path="/" element={<p>Home page route</p>} />
+              <Route path="/news" element={<p>News category route</p>} />
+              <Route path="/news/:slug" element={<p>Article route</p>} />
               <Route path="/videos" element={<p>Videos page route</p>} />
               <Route path="/videos/:id" element={<p>Individual video route</p>} />
             </Route>
@@ -85,6 +87,32 @@ afterEach(async () => {
 });
 
 describe('public accessibility preferences', () => {
+  it('scrolls the document smoothly to the top with keyboard activation', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
+    window.scrollTo.mockClear();
+    renderPublicNavigation('/news/example-article');
+
+    const backToTop = await screen.findByRole('link', { name: 'Back to top' });
+    backToTop.focus();
+    await user.keyboard('{Enter}');
+
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'smooth' });
+    expect(screen.getByText('Article route')).toBeInTheDocument();
+  });
+
+  it('scrolls instantly when reduced motion is enabled', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })));
+    window.scrollTo.mockClear();
+    renderPublicNavigation('/news');
+
+    await user.click(await screen.findByRole('link', { name: 'Back to top' }));
+
+    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'instant' });
+    expect(screen.getByText('News category route')).toBeInTheDocument();
+  });
+
   it('changes text size, stops at both limits, and resets to default', async () => {
     const user = userEvent.setup();
     renderPublicSite();

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { getCategories, getNews } from '../api/news.js';
+import { getCategories, getNews, getStartupCities } from '../api/news.js';
 import CategoryFilter from '../components/CategoryFilter.jsx';
 import NewsSearch from '../components/NewsSearch.jsx';
 import RevealSection from '../components/RevealSection.jsx';
@@ -15,9 +15,12 @@ export default function NewsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get('q') ?? '';
   const category = searchParams.get('category') ?? '';
+  const city = searchParams.get('city') ?? '';
   const page = Math.max(1, Number.parseInt(searchParams.get('page') ?? '1', 10) || 1);
   const [categories, setCategories] = useState([]);
+  const [startupCities, setStartupCities] = useState([]);
   const [categoryError, setCategoryError] = useState('');
+  const [cityError, setCityError] = useState('');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -34,10 +37,33 @@ export default function NewsPage() {
   }, []);
 
   useEffect(() => {
+    if (category !== 'startups') {
+      setStartupCities([]);
+      setCityError('');
+      return undefined;
+    }
+    const controller = new AbortController();
+    setCityError('');
+    getStartupCities({ signal: controller.signal })
+      .then(setStartupCities)
+      .catch((fetchError) => {
+        if (fetchError.name !== 'AbortError') setCityError(fetchError.message);
+      });
+    return () => controller.abort();
+  }, [category]);
+
+  useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    getNews({ page, limit: 9, q: query || undefined, category: category || undefined, signal: controller.signal })
+    getNews({
+      page,
+      limit: 9,
+      q: query || undefined,
+      category: category || undefined,
+      city: city || undefined,
+      signal: controller.signal
+    })
       .then(setResult)
       .catch((fetchError) => {
         if (fetchError.name !== 'AbortError') setError(fetchError.message);
@@ -46,7 +72,7 @@ export default function NewsPage() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [page, query, category, attempt]);
+  }, [page, query, category, city, attempt]);
 
   const updateFilters = useCallback((updates) => {
     setSearchParams((current) => {
@@ -76,7 +102,7 @@ export default function NewsPage() {
         <CategoryFilter
           categories={categories}
           selected={category}
-          onChange={(value) => updateFilters({ category: value })}
+          onChange={(value) => updateFilters({ category: value, city: '' })}
           disabled={Boolean(categoryError) && categories.length === 0}
         />
         {categoryError && categories.length === 0 && (
@@ -85,6 +111,31 @@ export default function NewsPage() {
           </p>
         )}
       </div>
+
+      {category === 'startups' && (
+        <nav className="category-filter startup-city-filter" aria-label={t('Filter by Startup city')}>
+          <button
+            className={`category-chip${city ? '' : ' category-chip--active'}`}
+            type="button"
+            aria-pressed={!city}
+            onClick={() => updateFilters({ city: '' })}
+          >
+            {t('All Categories')}
+          </button>
+          {startupCities.map((startupCity) => (
+            <button
+              className={`category-chip${city === startupCity.slug ? ' category-chip--active' : ''}`}
+              type="button"
+              aria-pressed={city === startupCity.slug}
+              key={startupCity.id}
+              onClick={() => updateFilters({ city: startupCity.slug })}
+            >
+              {t(startupCity.name)}
+            </button>
+          ))}
+          {cityError && <p className="inline-error" role="status">{t('City filters are temporarily unavailable.')}</p>}
+        </nav>
+      )}
 
       {query && (
         <p className="results-label">
@@ -104,7 +155,7 @@ export default function NewsPage() {
       )}
       {!loading && !error && articles.length > 0 && (
         <>
-          <RevealSection as="div" className="story-grid news-grid" key={`${category}-${query}-${page}`}>
+          <RevealSection as="div" className="story-grid news-grid" key={`${category}-${city}-${query}-${page}`}>
             {articles.map((article) => <StoryCard article={article} key={article.id} />)}
           </RevealSection>
           {pagination?.totalPages > 1 && (

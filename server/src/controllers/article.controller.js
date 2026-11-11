@@ -7,11 +7,16 @@ import {
   listAdminArticles,
   listCategories,
   listPublicArticles,
+  listStartupCities,
   updateArticle
 } from '../services/article.service.js';
 
 export const categoriesController = asyncHandler(async (request, response) => {
   response.status(200).json({ data: await listCategories(request.app.locals.database) });
+});
+
+export const startupCitiesController = asyncHandler(async (request, response) => {
+  response.status(200).json({ data: await listStartupCities(request.app.locals.database) });
 });
 
 export const publicNewsController = asyncHandler(async (request, response) => {
@@ -52,6 +57,7 @@ export const createArticleController = asyncHandler(async (request, response) =>
     after: {
       status: article.status,
       categoryId: article.category_id,
+      startupCityId: article.startup_city_id,
       isFeatured: Number(article.is_featured) === 1
     }
   };
@@ -67,6 +73,7 @@ export const updateArticleController = asyncHandler(async (request, response) =>
     slug: before.slug,
     status: before.status,
     categoryId: before.category_id,
+    startupCityId: before.startup_city_id,
     isFeatured: Number(before.is_featured) === 1
   };
   const afterSnapshot = {
@@ -74,6 +81,7 @@ export const updateArticleController = asyncHandler(async (request, response) =>
     slug: article.slug,
     status: article.status,
     categoryId: article.category_id,
+    startupCityId: article.startup_city_id,
     isFeatured: Number(article.is_featured) === 1
   };
   const updatedFields = Object.keys(request.validated.body).filter((key) => {
@@ -83,6 +91,10 @@ export const updateArticleController = asyncHandler(async (request, response) =>
     if (key === 'is_featured') return Boolean(Number(previous)) !== next;
     return String(previous ?? '') !== String(next ?? '');
   });
+  if (String(before.startup_city_id ?? '') !== String(article.startup_city_id ?? '')
+      && !updatedFields.includes('startup_city_id')) {
+    updatedFields.push('startup_city_id');
+  }
   request.activityChanged = updatedFields.length > 0;
   if (request.activityChanged) {
     const trackedFields = Object.keys(beforeSnapshot).filter((key) => (
@@ -113,6 +125,7 @@ export const deleteArticleController = asyncHandler(async (request, response) =>
       slug: before.slug,
       status: before.status,
       categoryId: before.category_id,
+      startupCityId: before.startup_city_id,
       isFeatured: Number(before.is_featured) === 1
     }
   };
